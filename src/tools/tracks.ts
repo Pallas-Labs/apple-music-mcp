@@ -8,71 +8,89 @@ import type { Track } from "../types.js";
 import type { ToolDef } from "../server.js";
 
 export const getPlaylistTracksTool: ToolDef = {
-    name: "music.get_playlist_tracks",
-    description: "Get tracks in a playlist. Supports pagination via offset/limit.",
-    inputSchema: {
-        playlistId: persistentIdSchema,
-        offset: z.number().int().min(0).optional().describe("Start index (default 0)."),
-        limit: z.number().int().min(1).max(100).optional().describe("Max tracks to return (default 50)."),
-    },
-    outputSchema: {
-        tracks: z.array(
-            z.object({
-                id: z.string(),
-                name: z.string(),
-                artist: z.string(),
-                album: z.string(),
-                duration: z.number(),
-            }),
-        ),
-        total: z.number(),
-        offset: z.number(),
-        limit: z.number(),
-    },
-    writesRequired: false,
-    async handler({ playlistId, offset, limit }: { playlistId: string; offset?: number; limit?: number }) {
-        const result = await getPlaylistTracks(playlistId, offset ?? 0, limit ?? 50);
-        return {
-            structuredContent: result,
-            logData: { playlistId, trackCount: result.tracks.length, total: result.total },
-        };
-    },
+  name: "music.get_playlist_tracks",
+  description: "Get tracks in a playlist. Supports pagination via offset/limit.",
+  inputSchema: {
+    playlistId: persistentIdSchema,
+    offset: z.number().int().min(0).optional().describe("Start index (default 0)."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("Max tracks to return (default 50)."),
+  },
+  outputSchema: {
+    tracks: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        artist: z.string(),
+        album: z.string(),
+        duration: z.number(),
+      }),
+    ),
+    total: z.number(),
+    offset: z.number(),
+    limit: z.number(),
+  },
+  writesRequired: false,
+  async handler({
+    playlistId,
+    offset,
+    limit,
+  }: {
+    playlistId: string;
+    offset?: number;
+    limit?: number;
+  }) {
+    const result = await getPlaylistTracks(playlistId, offset ?? 0, limit ?? 50);
+    return {
+      structuredContent: result,
+      logData: { playlistId, trackCount: result.tracks.length, total: result.total },
+    };
+  },
 };
 
 export const addTracksToPlaylistTool: ToolDef = {
-    name: "music.add_tracks_to_playlist",
-    description: "Add tracks to a playlist by their persistent IDs.",
-    inputSchema: {
-        playlistId: persistentIdSchema,
-        trackIds: z.array(persistentIdSchema).min(1).max(100).describe("Persistent IDs of tracks to add."),
-    },
-    outputSchema: {
-        added: z.number(),
-        playlistId: z.string(),
-    },
-    writesRequired: true,
-    dryRunResult({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) {
-        return {
-            added: trackIds.length,
-            playlistId,
-        };
-    },
-    async handler({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) {
-        const result = await addTracksToPlaylist(playlistId, trackIds);
-        return {
-            structuredContent: result,
-            logData: { playlistId, addedCount: result.added },
-        };
-    },
+  name: "music.add_tracks_to_playlist",
+  description: "Add tracks to a playlist by their persistent IDs.",
+  inputSchema: {
+    playlistId: persistentIdSchema,
+    trackIds: z
+      .array(persistentIdSchema)
+      .min(1)
+      .max(100)
+      .describe("Persistent IDs of tracks to add."),
+  },
+  outputSchema: {
+    added: z.number(),
+    playlistId: z.string(),
+  },
+  writesRequired: true,
+  dryRunResult({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) {
+    return {
+      added: trackIds.length,
+      playlistId,
+    };
+  },
+  async handler({ playlistId, trackIds }: { playlistId: string; trackIds: string[] }) {
+    const result = await addTracksToPlaylist(playlistId, trackIds);
+    return {
+      structuredContent: result,
+      logData: { playlistId, addedCount: result.added },
+    };
+  },
 };
 
 async function getPlaylistTracks(
-    playlistId: string,
-    offset: number,
-    limit: number,
+  playlistId: string,
+  offset: number,
+  limit: number,
 ): Promise<{ tracks: Track[]; total: number; offset: number; limit: number }> {
-    const safeId = escapeAppleScriptString(playlistId);
-    const body = `
+  const safeId = escapeAppleScriptString(playlistId);
+  const body = `
 try
     tell application id "com.apple.Music"
         with timeout of 60 seconds
@@ -121,27 +139,32 @@ on jsonTracks(rows)
     return json & "]"
 end jsonTracks`;
 
-    const result = await runAppleScript(buildScript(body), 60_000);
+  const result = await runAppleScript(buildScript(body), 60_000);
 
-    let parsed: { tracks: Track[]; total: number; offset: number; limit: number };
-    try {
-        parsed = JSON.parse(result.stdout) as { tracks: Track[]; total: number; offset: number; limit: number };
-    } catch {
-        throw new MusicToolError("script_error", "Music returned an invalid playlist tracks payload.", {
-            raw: result.stdout,
-        });
-    }
-    return parsed;
+  let parsed: { tracks: Track[]; total: number; offset: number; limit: number };
+  try {
+    parsed = JSON.parse(result.stdout) as {
+      tracks: Track[];
+      total: number;
+      offset: number;
+      limit: number;
+    };
+  } catch {
+    throw new MusicToolError("script_error", "Music returned an invalid playlist tracks payload.", {
+      raw: result.stdout,
+    });
+  }
+  return parsed;
 }
 
 async function addTracksToPlaylist(
-    playlistId: string,
-    trackIds: string[],
+  playlistId: string,
+  trackIds: string[],
 ): Promise<{ added: number; playlistId: string }> {
-    const safePlaylistId = escapeAppleScriptString(playlistId);
-    // Build an AppleScript list of track IDs
-    const idList = trackIds.map((id) => `"${escapeAppleScriptString(id)}"`).join(", ");
-    const body = `
+  const safePlaylistId = escapeAppleScriptString(playlistId);
+  // Build an AppleScript list of track IDs
+  const idList = trackIds.map((id) => `"${escapeAppleScriptString(id)}"`).join(", ");
+  const body = `
 try
     tell application id "com.apple.Music"
         with timeout of 60 seconds
@@ -162,15 +185,15 @@ on error errMsg number errNum
     error errMsg number errNum
 end try`;
 
-    const result = await runAppleScript(buildScript(body), 60_000);
+  const result = await runAppleScript(buildScript(body), 60_000);
 
-    let parsed: { added: number; playlistId: string };
-    try {
-        parsed = JSON.parse(result.stdout) as { added: number; playlistId: string };
-    } catch {
-        throw new MusicToolError("script_error", "Music returned an invalid add tracks payload.", {
-            raw: result.stdout,
-        });
-    }
-    return parsed;
+  let parsed: { added: number; playlistId: string };
+  try {
+    parsed = JSON.parse(result.stdout) as { added: number; playlistId: string };
+  } catch {
+    throw new MusicToolError("script_error", "Music returned an invalid add tracks payload.", {
+      raw: result.stdout,
+    });
+  }
+  return parsed;
 }

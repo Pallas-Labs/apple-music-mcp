@@ -8,77 +8,80 @@ import type { Playlist } from "../types.js";
 import type { ToolDef } from "../server.js";
 
 export const listPlaylistsTool: ToolDef = {
-    name: "music.list_playlists",
-    description: "List Apple Music user playlists. Optionally filter by folder ID.",
-    inputSchema: {
-        folderId: persistentIdSchema.optional(),
-        includeRoot: z.boolean().optional(),
-    },
-    outputSchema: {
-        playlists: z.array(
-            z.object({
-                id: z.string(),
-                name: z.string(),
-                folderId: z.string().optional(),
-                isSmart: z.boolean(),
-                trackCount: z.number().optional(),
-            }),
-        ),
-    },
-    writesRequired: false,
-    async handler({ folderId, includeRoot }: { folderId?: string; includeRoot?: boolean }) {
-        const input: { folderId?: string; includeRoot?: boolean } = {};
-        if (folderId !== undefined) input.folderId = folderId;
-        if (includeRoot !== undefined) input.includeRoot = includeRoot;
-        const playlists = await listPlaylists(input);
-        return {
-            structuredContent: { playlists },
-            logData: { playlistCount: playlists.length, hasFolderFilter: Boolean(folderId) },
-        };
-    },
+  name: "music.list_playlists",
+  description: "List Apple Music user playlists. Optionally filter by folder ID.",
+  inputSchema: {
+    folderId: persistentIdSchema.optional(),
+    includeRoot: z.boolean().optional(),
+  },
+  outputSchema: {
+    playlists: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        folderId: z.string().optional(),
+        isSmart: z.boolean(),
+        trackCount: z.number().optional(),
+      }),
+    ),
+  },
+  writesRequired: false,
+  async handler({ folderId, includeRoot }: { folderId?: string; includeRoot?: boolean }) {
+    const input: { folderId?: string; includeRoot?: boolean } = {};
+    if (folderId !== undefined) input.folderId = folderId;
+    if (includeRoot !== undefined) input.includeRoot = includeRoot;
+    const playlists = await listPlaylists(input);
+    return {
+      structuredContent: { playlists },
+      logData: { playlistCount: playlists.length, hasFolderFilter: Boolean(folderId) },
+    };
+  },
 };
 
 export const createPlaylistTool: ToolDef = {
-    name: "music.create_playlist",
-    description: "Create a user playlist, optionally inside a folder.",
-    inputSchema: {
-        name: nameSchema,
-        folderId: persistentIdSchema.optional(),
-    },
-    outputSchema: {
-        playlist: z.object({
-            id: z.string(),
-            name: z.string(),
-            folderId: z.string().optional(),
-            isSmart: z.boolean(),
-            trackCount: z.number().optional(),
-        }),
-    },
-    writesRequired: true,
-    dryRunResult({ name, folderId }: { name: string; folderId?: string }) {
-        return {
-            playlist: {
-                id: `DRYRUN_${Date.now()}`,
-                name,
-                ...(folderId !== undefined ? { folderId } : {}),
-                isSmart: false,
-                trackCount: 0,
-            },
-        };
-    },
-    async handler({ name, folderId }: { name: string; folderId?: string }) {
-        const input: { name: string; folderId?: string } = { name };
-        if (folderId !== undefined) input.folderId = folderId;
-        const playlist = await createPlaylist(input);
-        return {
-            structuredContent: { playlist },
-            logData: { playlistId: playlist.id, hasFolderTarget: Boolean(folderId) },
-        };
-    },
+  name: "music.create_playlist",
+  description: "Create a user playlist, optionally inside a folder.",
+  inputSchema: {
+    name: nameSchema,
+    folderId: persistentIdSchema.optional(),
+  },
+  outputSchema: {
+    playlist: z.object({
+      id: z.string(),
+      name: z.string(),
+      folderId: z.string().optional(),
+      isSmart: z.boolean(),
+      trackCount: z.number().optional(),
+    }),
+  },
+  writesRequired: true,
+  dryRunResult({ name, folderId }: { name: string; folderId?: string }) {
+    return {
+      playlist: {
+        id: `DRYRUN_${Date.now()}`,
+        name,
+        ...(folderId !== undefined ? { folderId } : {}),
+        isSmart: false,
+        trackCount: 0,
+      },
+    };
+  },
+  async handler({ name, folderId }: { name: string; folderId?: string }) {
+    const input: { name: string; folderId?: string } = { name };
+    if (folderId !== undefined) input.folderId = folderId;
+    const playlist = await createPlaylist(input);
+    return {
+      structuredContent: { playlist },
+      logData: { playlistId: playlist.id, hasFolderTarget: Boolean(folderId) },
+    };
+  },
 };
 
-async function listPlaylists(input: { folderId?: string; includeRoot?: boolean }): Promise<Playlist[]> {
-    const body = `
+async function listPlaylists(input: {
+  folderId?: string;
+  includeRoot?: boolean;
+}): Promise<Playlist[]> {
+  const body = `
 try
     tell application id "com.apple.Music"
         with timeout of 60 seconds
@@ -141,58 +144,64 @@ on jsonPlaylists(rows)
     return json & "]"
 end jsonPlaylists`;
 
-    const result = await runAppleScript(buildScript(body), 70_000);
+  const result = await runAppleScript(buildScript(body), 70_000);
 
-    let parsed: Array<{ id: string; name: string; folderId: string; isSmart: boolean; trackCount: number }>;
-    try {
-        parsed = JSON.parse(result.stdout) as Array<{
-            id: string;
-            name: string;
-            folderId: string;
-            isSmart: boolean;
-            trackCount: number;
-        }>;
-    } catch {
-        throw new MusicToolError("script_error", "Music returned an invalid playlist payload.", {
-            raw: result.stdout,
-        });
+  let parsed: Array<{
+    id: string;
+    name: string;
+    folderId: string;
+    isSmart: boolean;
+    trackCount: number;
+  }>;
+  try {
+    parsed = JSON.parse(result.stdout) as Array<{
+      id: string;
+      name: string;
+      folderId: string;
+      isSmart: boolean;
+      trackCount: number;
+    }>;
+  } catch {
+    throw new MusicToolError("script_error", "Music returned an invalid playlist payload.", {
+      raw: result.stdout,
+    });
+  }
+
+  // Deduplicate by persistent ID
+  const seen = new Set<string>();
+  const deduped = parsed.filter((p) => {
+    if (seen.has(p.id)) return false;
+    seen.add(p.id);
+    return true;
+  });
+
+  const includeRoot = input.includeRoot ?? true;
+  const filtered = deduped.filter((playlist) => {
+    const parentId = playlist.folderId.trim();
+    if (input.folderId) return parentId === input.folderId;
+    if (!includeRoot) return parentId.length > 0;
+    return true;
+  });
+
+  return filtered.map((playlist) => {
+    const output: Playlist = {
+      id: playlist.id,
+      name: playlist.name,
+      isSmart: Boolean(playlist.isSmart),
+    };
+    const folderId = playlist.folderId.trim();
+    if (folderId.length > 0) output.folderId = folderId;
+    if (Number.isFinite(playlist.trackCount) && playlist.trackCount >= 0) {
+      output.trackCount = playlist.trackCount;
     }
-
-    // Deduplicate by persistent ID
-    const seen = new Set<string>();
-    const deduped = parsed.filter((p) => {
-        if (seen.has(p.id)) return false;
-        seen.add(p.id);
-        return true;
-    });
-
-    const includeRoot = input.includeRoot ?? true;
-    const filtered = deduped.filter((playlist) => {
-        const parentId = playlist.folderId.trim();
-        if (input.folderId) return parentId === input.folderId;
-        if (!includeRoot) return parentId.length > 0;
-        return true;
-    });
-
-    return filtered.map((playlist) => {
-        const output: Playlist = {
-            id: playlist.id,
-            name: playlist.name,
-            isSmart: Boolean(playlist.isSmart),
-        };
-        const folderId = playlist.folderId.trim();
-        if (folderId.length > 0) output.folderId = folderId;
-        if (Number.isFinite(playlist.trackCount) && playlist.trackCount >= 0) {
-            output.trackCount = playlist.trackCount;
-        }
-        return output;
-    });
+    return output;
+  });
 }
 
 async function createPlaylist(input: { name: string; folderId?: string }): Promise<Playlist> {
-    const safeName = escapeAppleScriptString(input.name);
-    const safeFolderId = escapeAppleScriptString(input.folderId ?? "");
-    const body = `
+  const safeName = escapeAppleScriptString(input.name);
+  const safeFolderId = escapeAppleScriptString(input.folderId ?? "");
+  const body = `
 try
     tell application id "com.apple.Music"
         with timeout of 30 seconds
@@ -221,30 +230,30 @@ on jsonPlaylist(playlistId, playlistName, parentFolderId)
     return "{\\"id\\":\\"" & my jsonEscape(playlistId) & "\\",\\"name\\":\\"" & my jsonEscape(playlistName) & "\\",\\"folderId\\":\\"" & my jsonEscape(parentFolderId) & "\\",\\"isSmart\\":false,\\"trackCount\\":0}"
 end jsonPlaylist`;
 
-    const result = await runAppleScript(buildScript(body), 40_000);
+  const result = await runAppleScript(buildScript(body), 40_000);
 
-    let parsed: { id: string; name: string; folderId: string; isSmart: boolean; trackCount: number };
-    try {
-        parsed = JSON.parse(result.stdout) as {
-            id: string;
-            name: string;
-            folderId: string;
-            isSmart: boolean;
-            trackCount: number;
-        };
-    } catch {
-        throw new MusicToolError("script_error", "Music returned an invalid create playlist payload.", {
-            raw: result.stdout,
-        });
-    }
-
-    const output: Playlist = {
-        id: parsed.id,
-        name: parsed.name,
-        isSmart: false,
-        trackCount: 0,
+  let parsed: { id: string; name: string; folderId: string; isSmart: boolean; trackCount: number };
+  try {
+    parsed = JSON.parse(result.stdout) as {
+      id: string;
+      name: string;
+      folderId: string;
+      isSmart: boolean;
+      trackCount: number;
     };
-    const folderId = parsed.folderId.trim();
-    if (folderId.length > 0) output.folderId = folderId;
-    return output;
+  } catch {
+    throw new MusicToolError("script_error", "Music returned an invalid create playlist payload.", {
+      raw: result.stdout,
+    });
+  }
+
+  const output: Playlist = {
+    id: parsed.id,
+    name: parsed.name,
+    isSmart: false,
+    trackCount: 0,
+  };
+  const folderId = parsed.folderId.trim();
+  if (folderId.length > 0) output.folderId = folderId;
+  return output;
 }

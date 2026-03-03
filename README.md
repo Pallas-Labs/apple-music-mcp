@@ -33,7 +33,7 @@ npx -y apple-music-mcp
 
 | Variable                        | Default | Description                                                    |
 | ------------------------------- | ------- | -------------------------------------------------------------- |
-| `APPLE_MUSIC_MCP_ENABLE_WRITES` | `false` | Enable mutation tools (create, move, playback, add tracks)    |
+| `APPLE_MUSIC_MCP_ENABLE_WRITES` | `false` | Enable mutation tools (create, move, playback, add tracks)     |
 | `APPLE_MUSIC_MCP_DRY_RUN`       | `false` | Mutation tools return dry-run payloads without modifying Music |
 
 ## Setup (Recommended)
@@ -146,6 +146,7 @@ If you see `permission_denied` errors:
 git clone https://github.com/parthmangrola/apple-music-mcp.git
 cd apple-music-mcp
 bun install
+bun run format:check
 bun run lint
 bun run typecheck
 bun test src

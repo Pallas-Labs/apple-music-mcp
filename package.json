@@ -34,7 +34,7 @@
     "lint:fix": "oxlint src .github --deny-warnings --fix",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "prepublishOnly": "bun run lint && bun run typecheck && bun test src && bun run build",
+    "prepublishOnly": "bun run format:check && bun run lint && bun run typecheck && bun test src && bun run build",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "bun test src",

@@ -38,10 +38,10 @@ end replaceText
  * Prepends the "ensure Music is running" preamble and appends shared JSON handlers.
  */
 export function buildScript(body: string): string {
-    return `${PREAMBLE}\n${body}\n${SHARED_HANDLERS}`;
+  return `${PREAMBLE}\n${body}\n${SHARED_HANDLERS}`;
 }
 
 /** Build a script that doesn't need the Music preamble (e.g. health checks). */
 export function buildRawScript(body: string): string {
-    return body;
+  return body;
 }

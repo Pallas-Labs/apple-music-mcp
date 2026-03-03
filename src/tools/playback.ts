@@ -6,52 +6,53 @@ import type { NowPlaying } from "../types.js";
 import type { ToolDef } from "../server.js";
 
 export const getNowPlayingTool: ToolDef = {
-    name: "music.get_now_playing",
-    description: "Get the currently playing track: name, artist, album, duration, position, and player state.",
-    inputSchema: {},
-    outputSchema: {
-        name: z.string(),
-        artist: z.string(),
-        album: z.string(),
-        duration: z.number(),
-        position: z.number(),
-        playerState: z.enum(["playing", "paused", "stopped"]),
-    },
-    writesRequired: false,
-    async handler() {
-        const nowPlaying = await getNowPlaying();
-        return { structuredContent: nowPlaying };
-    },
+  name: "music.get_now_playing",
+  description:
+    "Get the currently playing track: name, artist, album, duration, position, and player state.",
+  inputSchema: {},
+  outputSchema: {
+    name: z.string(),
+    artist: z.string(),
+    album: z.string(),
+    duration: z.number(),
+    position: z.number(),
+    playerState: z.enum(["playing", "paused", "stopped"]),
+  },
+  writesRequired: false,
+  async handler() {
+    const nowPlaying = await getNowPlaying();
+    return { structuredContent: nowPlaying };
+  },
 };
 
 export const playbackControlTool: ToolDef = {
-    name: "music.playback_control",
-    description: "Control Apple Music playback: play, pause, next, previous, or toggle play/pause.",
-    inputSchema: {
-        action: z.enum(["play", "pause", "next", "previous", "toggle"]),
-    },
-    outputSchema: {
-        success: z.boolean(),
-        action: z.string(),
-        playerState: z.enum(["playing", "paused", "stopped"]),
-    },
-    writesRequired: true,
-    dryRunResult({ action }: { action: "play" | "pause" | "next" | "previous" | "toggle" }) {
-        const playerState = action === "pause" ? "paused" : "playing";
-        return {
-            success: true,
-            action,
-            playerState,
-        };
-    },
-    async handler({ action }: { action: "play" | "pause" | "next" | "previous" | "toggle" }) {
-        const result = await controlPlayback(action);
-        return { structuredContent: result, logData: { action } };
-    },
+  name: "music.playback_control",
+  description: "Control Apple Music playback: play, pause, next, previous, or toggle play/pause.",
+  inputSchema: {
+    action: z.enum(["play", "pause", "next", "previous", "toggle"]),
+  },
+  outputSchema: {
+    success: z.boolean(),
+    action: z.string(),
+    playerState: z.enum(["playing", "paused", "stopped"]),
+  },
+  writesRequired: true,
+  dryRunResult({ action }: { action: "play" | "pause" | "next" | "previous" | "toggle" }) {
+    const playerState = action === "pause" ? "paused" : "playing";
+    return {
+      success: true,
+      action,
+      playerState,
+    };
+  },
+  async handler({ action }: { action: "play" | "pause" | "next" | "previous" | "toggle" }) {
+    const result = await controlPlayback(action);
+    return { structuredContent: result, logData: { action } };
+  },
 };
 
 async function getNowPlaying(): Promise<NowPlaying> {
-    const script = buildRawScript(`
+  const script = buildRawScript(`
 try
     if application "Music" is not running then
         return "{\\"playerState\\":\\"stopped\\",\\"name\\":\\"\\",\\"artist\\":\\"\\",\\"album\\":\\"\\",\\"duration\\":0,\\"position\\":0}"
@@ -99,33 +100,33 @@ on replaceText(findText, replaceText, sourceText)
 end replaceText
 `);
 
-    const result = await runAppleScript(script, 10_000);
+  const result = await runAppleScript(script, 10_000);
 
-    let parsed: NowPlaying;
-    try {
-        parsed = JSON.parse(result.stdout) as NowPlaying;
-    } catch {
-        throw new MusicToolError("script_error", "Music returned an invalid now playing payload.", {
-            raw: result.stdout,
-        });
-    }
-    return parsed;
+  let parsed: NowPlaying;
+  try {
+    parsed = JSON.parse(result.stdout) as NowPlaying;
+  } catch {
+    throw new MusicToolError("script_error", "Music returned an invalid now playing payload.", {
+      raw: result.stdout,
+    });
+  }
+  return parsed;
 }
 
 async function controlPlayback(
-    action: "play" | "pause" | "next" | "previous" | "toggle",
+  action: "play" | "pause" | "next" | "previous" | "toggle",
 ): Promise<{ success: boolean; action: string; playerState: "playing" | "paused" | "stopped" }> {
-    const actionMap: Record<string, string> = {
-        play: "play",
-        pause: "pause",
-        next: "next track",
-        previous: "previous track",
-        toggle: "playpause",
-    };
+  const actionMap: Record<string, string> = {
+    play: "play",
+    pause: "pause",
+    next: "next track",
+    previous: "previous track",
+    toggle: "playpause",
+  };
 
-    const asAction = actionMap[action] ?? "playpause";
+  const asAction = actionMap[action] ?? "playpause";
 
-    const script = buildScript(`
+  const script = buildScript(`
 try
     tell application id "com.apple.Music"
         ${asAction}
@@ -143,15 +144,23 @@ on error errMsg number errNum
     error errMsg number errNum
 end try`);
 
-    const result = await runAppleScript(script, 15_000);
+  const result = await runAppleScript(script, 15_000);
 
-    let parsed: { success: boolean; action: string; playerState: "playing" | "paused" | "stopped" };
-    try {
-        parsed = JSON.parse(result.stdout) as { success: boolean; action: string; playerState: "playing" | "paused" | "stopped" };
-    } catch {
-        throw new MusicToolError("script_error", "Music returned an invalid playback control payload.", {
-            raw: result.stdout,
-        });
-    }
-    return parsed;
+  let parsed: { success: boolean; action: string; playerState: "playing" | "paused" | "stopped" };
+  try {
+    parsed = JSON.parse(result.stdout) as {
+      success: boolean;
+      action: string;
+      playerState: "playing" | "paused" | "stopped";
+    };
+  } catch {
+    throw new MusicToolError(
+      "script_error",
+      "Music returned an invalid playback control payload.",
+      {
+        raw: result.stdout,
+      },
+    );
+  }
+  return parsed;
 }
