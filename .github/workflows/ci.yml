@@ -18,6 +18,8 @@ jobs:
 
       - run: bun install
 
+      - run: bun run lint
+
       - run: bun run typecheck
 
       - run: bun test src

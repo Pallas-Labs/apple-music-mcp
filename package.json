@@ -2,8 +2,19 @@
   "name": "apple-music-mcp",
   "version": "0.1.0",
   "description": "MCP server for controlling Apple Music on macOS via AppleScript",
-  "type": "module",
-  "main": "dist/index.js",
+  "keywords": [
+    "apple-music",
+    "applescript",
+    "macos",
+    "mcp",
+    "model-context-protocol"
+  ],
+  "license": "MIT",
+  "author": "Parth Mangrola",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/parthmangrola/apple-music-mcp.git"
+  },
   "bin": {
     "apple-music-mcp": "dist/index.js"
   },
@@ -15,28 +26,19 @@
   "os": [
     "darwin"
   ],
-  "engines": {
-    "node": ">=20"
-  },
+  "type": "module",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "lint": "oxlint src .github --deny-warnings",
+    "lint:fix": "oxlint src .github --deny-warnings --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "prepublishOnly": "bun run lint && bun run typecheck && bun test src && bun run build",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "bun test src",
     "test:integration": "INTEGRATION=true bun test src"
-  },
-  "keywords": [
-    "mcp",
-    "apple-music",
-    "macos",
-    "applescript",
-    "model-context-protocol"
-  ],
-  "author": "Parth Mangrola",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/parthmangrola/apple-music-mcp.git"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
@@ -45,6 +47,11 @@
   "devDependencies": {
     "@types/bun": "^1.2.14",
     "@types/node": "^25.3.3",
+    "oxfmt": "^0.36.0",
+    "oxlint": "^1.51.0",
     "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
