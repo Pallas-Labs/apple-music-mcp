@@ -5,51 +5,56 @@ import { escapeAppleScriptString } from "../applescript/escape.js";
 import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { Folder } from "../types.js";
-import type { ToolDef } from "../server.js";
+import {
+  ADDITIVE_WRITE_ANNOTATIONS,
+  defineTool,
+  READ_ONLY_ANNOTATIONS,
+} from "../tool-contracts.js";
 
-export const listFoldersTool: ToolDef = {
+const folderSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  isRoot: z.boolean(),
+  parentId: z.string().optional(),
+});
+const listFoldersInputSchema = {
+  includeEmpty: z.boolean().optional(),
+};
+const listFoldersOutputSchema = {
+  folders: z.array(folderSchema),
+};
+const createFolderInputSchema = {
+  name: nameSchema,
+  parentId: persistentIdSchema.optional(),
+};
+const createFolderOutputSchema = {
+  folder: folderSchema,
+};
+
+export const listFoldersTool = defineTool({
   name: "music.list_folders",
   description: "List Apple Music folder playlists.",
-  inputSchema: {
-    includeEmpty: z.boolean().optional(),
-  },
-  outputSchema: {
-    folders: z.array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        isRoot: z.boolean(),
-        parentId: z.string().optional(),
-      }),
-    ),
-  },
+  inputSchema: listFoldersInputSchema,
+  outputSchema: listFoldersOutputSchema,
+  annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
-  async handler({ includeEmpty = true }: { includeEmpty?: boolean }) {
+  async handler({ includeEmpty = true }) {
     const folders = await listFolders(includeEmpty);
     return {
       structuredContent: { folders },
       logData: { folderCount: folders.length, includeEmpty },
     };
   },
-};
+});
 
-export const createFolderTool: ToolDef = {
+export const createFolderTool = defineTool({
   name: "music.create_folder",
   description: "Create a folder playlist, optionally inside a parent folder.",
-  inputSchema: {
-    name: nameSchema,
-    parentId: persistentIdSchema.optional(),
-  },
-  outputSchema: {
-    folder: z.object({
-      id: z.string(),
-      name: z.string(),
-      isRoot: z.boolean(),
-      parentId: z.string().optional(),
-    }),
-  },
+  inputSchema: createFolderInputSchema,
+  outputSchema: createFolderOutputSchema,
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
   writesRequired: true,
-  dryRunResult({ name, parentId }: { name: string; parentId?: string }) {
+  dryRunResult({ name, parentId }) {
     return {
       folder: {
         id: `DRYRUN_${Date.now()}`,
@@ -59,13 +64,13 @@ export const createFolderTool: ToolDef = {
       },
     };
   },
-  async handler({ name, parentId }: { name: string; parentId?: string }) {
+  async handler({ name, parentId }) {
     const input: { name: string; parentId?: string } = { name };
     if (parentId !== undefined) input.parentId = parentId;
     const folder = await createFolder(input);
     return { structuredContent: { folder }, logData: { folderId: folder.id } };
   },
-};
+});
 
 async function listFolders(includeEmpty: boolean): Promise<Folder[]> {
   const body = `
@@ -113,7 +118,7 @@ end jsonFolders`;
     parsed = JSON.parse(result.stdout) as Array<{ id: string; name: string; parentId: string }>;
   } catch {
     throw new MusicToolError("script_error", "Music returned an invalid folder payload.", {
-      raw: result.stdout,
+      outputLength: result.stdout.length,
     });
   }
 
@@ -180,9 +185,7 @@ end jsonIdList`;
     throw new MusicToolError(
       "script_error",
       "Music returned an invalid non-empty folder payload.",
-      {
-        raw: result.stdout,
-      },
+      { outputLength: result.stdout.length },
     );
   }
 
@@ -228,7 +231,7 @@ end jsonFolder`;
     parsed = JSON.parse(result.stdout) as { id: string; name: string; parentId: string };
   } catch {
     throw new MusicToolError("script_error", "Music returned an invalid create folder payload.", {
-      raw: result.stdout,
+      outputLength: result.stdout.length,
     });
   }
 

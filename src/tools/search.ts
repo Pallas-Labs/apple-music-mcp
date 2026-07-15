@@ -4,38 +4,37 @@ import { escapeAppleScriptString } from "../applescript/escape.js";
 import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { Track } from "../types.js";
-import type { ToolDef } from "../server.js";
+import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
 
-export const searchLibraryTool: ToolDef = {
+const searchLibraryInputSchema = {
+  query: z.string().trim().min(1).max(255).describe("Search query (matches track name or artist)."),
+  limit: z.number().int().min(1).max(50).optional().describe("Max results (default 50)."),
+};
+const searchLibraryOutputSchema = {
+  tracks: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      artist: z.string(),
+      album: z.string(),
+      duration: z.number(),
+    }),
+  ),
+};
+
+export const searchLibraryTool = defineTool({
   name: "music.search_library",
   description:
     "Search the Apple Music library for tracks by name or artist. Returns up to 50 results.",
-  inputSchema: {
-    query: z
-      .string()
-      .trim()
-      .min(1)
-      .max(255)
-      .describe("Search query (matches track name or artist)."),
-    limit: z.number().int().min(1).max(50).optional().describe("Max results (default 50)."),
-  },
-  outputSchema: {
-    tracks: z.array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        artist: z.string(),
-        album: z.string(),
-        duration: z.number(),
-      }),
-    ),
-  },
+  inputSchema: searchLibraryInputSchema,
+  outputSchema: searchLibraryOutputSchema,
+  annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
-  async handler({ query, limit }: { query: string; limit?: number }) {
+  async handler({ query, limit }) {
     const tracks = await searchLibrary(query, limit ?? 50);
     return { structuredContent: { tracks }, logData: { query, resultCount: tracks.length } };
   },
-};
+});
 
 async function searchLibrary(query: string, limit: number): Promise<Track[]> {
   const safeQuery = escapeAppleScriptString(query);
@@ -90,7 +89,7 @@ end jsonTracks`;
     parsed = JSON.parse(result.stdout) as Track[];
   } catch {
     throw new MusicToolError("script_error", "Music returned an invalid search payload.", {
-      raw: result.stdout,
+      outputLength: result.stdout.length,
     });
   }
   return parsed;

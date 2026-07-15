@@ -22,6 +22,15 @@ on jsonEscape(sourceText)
     return sourceText
 end jsonEscape
 
+on jsonStringArray(values)
+    set json to "["
+    repeat with i from 1 to (count of values)
+        set json to json & "\\"" & my jsonEscape((item i of values) as text) & "\\""
+        if i < (count of values) then set json to json & ","
+    end repeat
+    return json & "]"
+end jsonStringArray
+
 on replaceText(findText, replaceText, sourceText)
     set tid to AppleScript's text item delimiters
     set AppleScript's text item delimiters to findText

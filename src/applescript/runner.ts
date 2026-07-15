@@ -39,7 +39,7 @@ const defaultExecFn: ExecFn = async (script, timeoutMs) => {
   const { stdout, stderr } = await execFileAsync("osascript", ["-s", "s", "-e", script], {
     encoding: "utf8",
     timeout: timeoutMs,
-    maxBuffer: 1024 * 1024,
+    maxBuffer: 8 * 1024 * 1024,
   });
   return {
     stdout: stdout.trim(),

@@ -3,7 +3,7 @@ import { SERVER_VERSION, runtimeConfig } from "../config.js";
 import { runAppleScript } from "../applescript/runner.js";
 import { MusicToolError } from "../types.js";
 import type { MusicHealth } from "../types.js";
-import type { ToolDef } from "../server.js";
+import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
 
 async function isMusicRunning(): Promise<boolean> {
   const script = `
@@ -61,17 +61,21 @@ async function getMusicHealth(): Promise<MusicHealth> {
   return { musicRunning, permissionGranted, serverVersion: SERVER_VERSION };
 }
 
-export const healthTool: ToolDef = {
+const healthInputSchema = {};
+const healthOutputSchema = {
+  musicRunning: z.boolean(),
+  permissionGranted: z.boolean(),
+  serverVersion: z.string(),
+  writesEnabled: z.boolean(),
+  dryRun: z.boolean(),
+};
+
+export const healthTool = defineTool({
   name: "music.health",
   description: "Check Apple Music availability and automation permission status.",
-  inputSchema: {},
-  outputSchema: {
-    musicRunning: z.boolean(),
-    permissionGranted: z.boolean(),
-    serverVersion: z.string(),
-    writesEnabled: z.boolean(),
-    dryRun: z.boolean(),
-  },
+  inputSchema: healthInputSchema,
+  outputSchema: healthOutputSchema,
+  annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
   async handler() {
     const health = await getMusicHealth();
@@ -85,4 +89,4 @@ export const healthTool: ToolDef = {
       logData: { musicRunning: health.musicRunning, permissionGranted: health.permissionGranted },
     };
   },
-};
+});

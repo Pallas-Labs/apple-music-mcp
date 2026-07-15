@@ -5,26 +5,35 @@ import { escapeAppleScriptString } from "../applescript/escape.js";
 import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { Playlist } from "../types.js";
-import type { ToolDef } from "../server.js";
+import { defineTool } from "../tool-contracts.js";
 
-export const movePlaylistTool: ToolDef = {
+const movePlaylistInputSchema = {
+  playlistId: persistentIdSchema,
+  targetFolderId: persistentIdSchema,
+};
+const movePlaylistOutputSchema = {
+  playlist: z.object({
+    id: z.string(),
+    name: z.string(),
+    folderId: z.string().optional(),
+    isSmart: z.boolean(),
+    trackCount: z.number().optional(),
+  }),
+};
+
+export const movePlaylistTool = defineTool({
   name: "music.move_playlist",
   description: "Move a playlist into a target folder.",
-  inputSchema: {
-    playlistId: persistentIdSchema,
-    targetFolderId: persistentIdSchema,
-  },
-  outputSchema: {
-    playlist: z.object({
-      id: z.string(),
-      name: z.string(),
-      folderId: z.string().optional(),
-      isSmart: z.boolean(),
-      trackCount: z.number().optional(),
-    }),
+  inputSchema: movePlaylistInputSchema,
+  outputSchema: movePlaylistOutputSchema,
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
   },
   writesRequired: true,
-  dryRunResult({ playlistId, targetFolderId }: { playlistId: string; targetFolderId: string }) {
+  dryRunResult({ playlistId, targetFolderId }) {
     return {
       playlist: {
         id: playlistId,
@@ -35,14 +44,14 @@ export const movePlaylistTool: ToolDef = {
       },
     };
   },
-  async handler({ playlistId, targetFolderId }: { playlistId: string; targetFolderId: string }) {
+  async handler({ playlistId, targetFolderId }) {
     const playlist = await movePlaylist({ playlistId, targetFolderId });
     return {
       structuredContent: { playlist },
       logData: { playlistId, targetFolderId },
     };
   },
-};
+});
 
 async function movePlaylist(input: {
   playlistId: string;
@@ -101,7 +110,7 @@ end jsonPlaylist`;
     };
   } catch {
     throw new MusicToolError("script_error", "Music returned an invalid move playlist payload.", {
-      raw: result.stdout,
+      outputLength: result.stdout.length,
     });
   }
 

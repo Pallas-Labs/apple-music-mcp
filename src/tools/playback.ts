@@ -3,53 +3,64 @@ import { runAppleScript } from "../applescript/runner.js";
 import { buildScript, buildRawScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { NowPlaying } from "../types.js";
-import type { ToolDef } from "../server.js";
+import {
+  ADDITIVE_WRITE_ANNOTATIONS,
+  defineTool,
+  READ_ONLY_ANNOTATIONS,
+} from "../tool-contracts.js";
 
-export const getNowPlayingTool: ToolDef = {
+const getNowPlayingInputSchema = {};
+const getNowPlayingOutputSchema = {
+  name: z.string(),
+  artist: z.string(),
+  album: z.string(),
+  duration: z.number(),
+  position: z.number(),
+  playerState: z.enum(["playing", "paused", "stopped"]),
+};
+const playbackControlInputSchema = {
+  action: z.enum(["play", "pause", "next", "previous", "toggle"]),
+};
+const playbackControlOutputSchema = {
+  success: z.boolean(),
+  action: z.string(),
+  playerState: z.enum(["playing", "paused", "stopped"]),
+};
+
+export const getNowPlayingTool = defineTool({
   name: "music.get_now_playing",
   description:
     "Get the currently playing track: name, artist, album, duration, position, and player state.",
-  inputSchema: {},
-  outputSchema: {
-    name: z.string(),
-    artist: z.string(),
-    album: z.string(),
-    duration: z.number(),
-    position: z.number(),
-    playerState: z.enum(["playing", "paused", "stopped"]),
-  },
+  inputSchema: getNowPlayingInputSchema,
+  outputSchema: getNowPlayingOutputSchema,
+  annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
   async handler() {
     const nowPlaying = await getNowPlaying();
     return { structuredContent: nowPlaying };
   },
-};
+});
 
-export const playbackControlTool: ToolDef = {
+export const playbackControlTool = defineTool({
   name: "music.playback_control",
   description: "Control Apple Music playback: play, pause, next, previous, or toggle play/pause.",
-  inputSchema: {
-    action: z.enum(["play", "pause", "next", "previous", "toggle"]),
-  },
-  outputSchema: {
-    success: z.boolean(),
-    action: z.string(),
-    playerState: z.enum(["playing", "paused", "stopped"]),
-  },
+  inputSchema: playbackControlInputSchema,
+  outputSchema: playbackControlOutputSchema,
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
   writesRequired: true,
-  dryRunResult({ action }: { action: "play" | "pause" | "next" | "previous" | "toggle" }) {
-    const playerState = action === "pause" ? "paused" : "playing";
+  dryRunResult({ action }) {
+    const playerState: "paused" | "playing" = action === "pause" ? "paused" : "playing";
     return {
       success: true,
       action,
       playerState,
     };
   },
-  async handler({ action }: { action: "play" | "pause" | "next" | "previous" | "toggle" }) {
+  async handler({ action }) {
     const result = await controlPlayback(action);
     return { structuredContent: result, logData: { action } };
   },
-};
+});
 
 async function getNowPlaying(): Promise<NowPlaying> {
   const script = buildRawScript(`
@@ -107,7 +118,7 @@ end replaceText
     parsed = JSON.parse(result.stdout) as NowPlaying;
   } catch {
     throw new MusicToolError("script_error", "Music returned an invalid now playing payload.", {
-      raw: result.stdout,
+      outputLength: result.stdout.length,
     });
   }
   return parsed;
@@ -157,9 +168,7 @@ end try`);
     throw new MusicToolError(
       "script_error",
       "Music returned an invalid playback control payload.",
-      {
-        raw: result.stdout,
-      },
+      { outputLength: result.stdout.length },
     );
   }
   return parsed;

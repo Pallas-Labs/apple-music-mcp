@@ -47,6 +47,27 @@ export type Track = {
   duration: number;
 };
 
+export type LibraryTrack = Track & {
+  genre: string;
+  year: number;
+  playCount: number;
+};
+
+export type TrackSortBy = "name" | "artist" | "album" | "year" | "playCount";
+
+export type TrackCriteria = {
+  nameQuery?: string | undefined;
+  artist?: string | undefined;
+  album?: string | undefined;
+  genre?: string | undefined;
+  yearMin?: number | undefined;
+  yearMax?: number | undefined;
+  playCountMin?: number | undefined;
+  playCountMax?: number | undefined;
+  limit?: number | undefined;
+  sortBy?: TrackSortBy | undefined;
+};
+
 export type NowPlaying = {
   name: string;
   artist: string;

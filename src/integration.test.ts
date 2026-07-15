@@ -28,5 +28,5 @@ end tell`;
     const result = await runAppleScript(script, 15_000);
     const count = Number(result.stdout);
     expect(count).toBeGreaterThanOrEqual(0);
-  });
+  }, 20_000);
 });

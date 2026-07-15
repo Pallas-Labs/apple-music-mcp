@@ -5,28 +5,64 @@ import { escapeAppleScriptString } from "../applescript/escape.js";
 import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { Playlist } from "../types.js";
-import type { ToolDef } from "../server.js";
+import {
+  ADDITIVE_WRITE_ANNOTATIONS,
+  defineTool,
+  READ_ONLY_ANNOTATIONS,
+} from "../tool-contracts.js";
+import {
+  addTracksToPlaylist,
+  findTracks,
+  trackCriteriaSchema,
+  type AddTracksResult,
+} from "./tracks.js";
 
-export const listPlaylistsTool: ToolDef = {
+const playlistSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  folderId: z.string().optional(),
+  isSmart: z.boolean(),
+  trackCount: z.number().optional(),
+});
+const listPlaylistsInputSchema = {
+  folderId: persistentIdSchema.optional(),
+  includeRoot: z.boolean().optional(),
+};
+const listPlaylistsOutputSchema = {
+  playlists: z.array(playlistSchema),
+};
+const createPlaylistInputSchema = {
+  name: nameSchema,
+  folderId: persistentIdSchema.optional(),
+};
+const createPlaylistOutputSchema = {
+  playlist: playlistSchema,
+};
+const createPlaylistFromCriteriaInputSchema = {
+  name: nameSchema,
+  folderId: persistentIdSchema.optional(),
+  criteria: trackCriteriaSchema,
+};
+const createPlaylistFromCriteriaOutputSchema = {
+  playlist: playlistSchema,
+  matched: z.number(),
+  requested: z.number(),
+  added: z.number(),
+  addedTrackIds: z.array(z.string()),
+  missingTrackIds: z.array(z.string()),
+  failedTrackIds: z.array(z.string()),
+  scanned: z.number(),
+  truncated: z.boolean(),
+};
+
+export const listPlaylistsTool = defineTool({
   name: "music.list_playlists",
   description: "List Apple Music user playlists. Optionally filter by folder ID.",
-  inputSchema: {
-    folderId: persistentIdSchema.optional(),
-    includeRoot: z.boolean().optional(),
-  },
-  outputSchema: {
-    playlists: z.array(
-      z.object({
-        id: z.string(),
-        name: z.string(),
-        folderId: z.string().optional(),
-        isSmart: z.boolean(),
-        trackCount: z.number().optional(),
-      }),
-    ),
-  },
+  inputSchema: listPlaylistsInputSchema,
+  outputSchema: listPlaylistsOutputSchema,
+  annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
-  async handler({ folderId, includeRoot }: { folderId?: string; includeRoot?: boolean }) {
+  async handler({ folderId, includeRoot }) {
     const input: { folderId?: string; includeRoot?: boolean } = {};
     if (folderId !== undefined) input.folderId = folderId;
     if (includeRoot !== undefined) input.includeRoot = includeRoot;
@@ -36,26 +72,16 @@ export const listPlaylistsTool: ToolDef = {
       logData: { playlistCount: playlists.length, hasFolderFilter: Boolean(folderId) },
     };
   },
-};
+});
 
-export const createPlaylistTool: ToolDef = {
+export const createPlaylistTool = defineTool({
   name: "music.create_playlist",
   description: "Create a user playlist, optionally inside a folder.",
-  inputSchema: {
-    name: nameSchema,
-    folderId: persistentIdSchema.optional(),
-  },
-  outputSchema: {
-    playlist: z.object({
-      id: z.string(),
-      name: z.string(),
-      folderId: z.string().optional(),
-      isSmart: z.boolean(),
-      trackCount: z.number().optional(),
-    }),
-  },
+  inputSchema: createPlaylistInputSchema,
+  outputSchema: createPlaylistOutputSchema,
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
   writesRequired: true,
-  dryRunResult({ name, folderId }: { name: string; folderId?: string }) {
+  dryRunResult({ name, folderId }) {
     return {
       playlist: {
         id: `DRYRUN_${Date.now()}`,
@@ -66,7 +92,7 @@ export const createPlaylistTool: ToolDef = {
       },
     };
   },
-  async handler({ name, folderId }: { name: string; folderId?: string }) {
+  async handler({ name, folderId }) {
     const input: { name: string; folderId?: string } = { name };
     if (folderId !== undefined) input.folderId = folderId;
     const playlist = await createPlaylist(input);
@@ -75,7 +101,82 @@ export const createPlaylistTool: ToolDef = {
       logData: { playlistId: playlist.id, hasFolderTarget: Boolean(folderId) },
     };
   },
-};
+});
+
+export const createPlaylistFromCriteriaTool = defineTool({
+  name: "music.create_playlist_from_criteria",
+  description: "Create a playlist from explicit bounded library search criteria.",
+  inputSchema: createPlaylistFromCriteriaInputSchema,
+  outputSchema: createPlaylistFromCriteriaOutputSchema,
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
+  writesRequired: true,
+  dryRunResult({ name, folderId }) {
+    return {
+      playlist: {
+        id: `DRYRUN_${Date.now()}`,
+        name,
+        ...(folderId !== undefined ? { folderId } : {}),
+        isSmart: false,
+        trackCount: 0,
+      },
+      matched: 0,
+      requested: 0,
+      added: 0,
+      addedTrackIds: [],
+      missingTrackIds: [],
+      failedTrackIds: [],
+      scanned: 0,
+      truncated: false,
+    };
+  },
+  async handler({ name, folderId, criteria }) {
+    const tracks = await findTracks(criteria);
+    const createInput: { name: string; folderId?: string } = { name };
+    if (folderId !== undefined) createInput.folderId = folderId;
+    const playlist = await createPlaylist(createInput);
+    const addResult: AddTracksResult =
+      tracks.tracks.length === 0
+        ? {
+            playlistId: playlist.id,
+            requested: 0,
+            added: 0,
+            addedTrackIds: [],
+            missingTrackIds: [],
+            failedTrackIds: [],
+          }
+        : await addTracksToPlaylist(
+            playlist.id,
+            tracks.tracks.map((track) => track.id),
+          );
+
+    return {
+      structuredContent: {
+        playlist: {
+          ...playlist,
+          trackCount: addResult.added,
+        },
+        matched: tracks.totalMatched,
+        requested: addResult.requested,
+        added: addResult.added,
+        addedTrackIds: addResult.addedTrackIds,
+        missingTrackIds: addResult.missingTrackIds,
+        failedTrackIds: addResult.failedTrackIds,
+        scanned: tracks.scanned,
+        truncated: tracks.truncated,
+      },
+      logData: {
+        playlistId: playlist.id,
+        matched: tracks.totalMatched,
+        requested: addResult.requested,
+        added: addResult.added,
+        missingCount: addResult.missingTrackIds.length,
+        failedCount: addResult.failedTrackIds.length,
+        scanned: tracks.scanned,
+        truncated: tracks.truncated,
+      },
+    };
+  },
+});
 
 async function listPlaylists(input: {
   folderId?: string;
@@ -163,7 +264,7 @@ end jsonPlaylists`;
     }>;
   } catch {
     throw new MusicToolError("script_error", "Music returned an invalid playlist payload.", {
-      raw: result.stdout,
+      outputLength: result.stdout.length,
     });
   }
 
@@ -243,7 +344,7 @@ end jsonPlaylist`;
     };
   } catch {
     throw new MusicToolError("script_error", "Music returned an invalid create playlist payload.", {
-      raw: result.stdout,
+      outputLength: result.stdout.length,
     });
   }
 

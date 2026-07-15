@@ -1,5 +1,7 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolDef, ToolSchema, ToolSchemaOutput } from "./tool-contracts.js";
+export { defineTool } from "./tool-contracts.js";
+export type { ToolDef, ToolResult } from "./tool-contracts.js";
 import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from "./config.js";
 import { MusicToolError } from "./types.js";
 import { log } from "./logger.js";
@@ -9,31 +11,17 @@ import {
   listFoldersTool,
   listPlaylistsTool,
   createPlaylistTool,
+  createPlaylistFromCriteriaTool,
   createFolderTool,
   movePlaylistTool,
   getNowPlayingTool,
   playbackControlTool,
   searchLibraryTool,
+  findTracksTool,
   getPlaylistTracksTool,
   addTracksToPlaylistTool,
+  removeTracksFromPlaylistTool,
 } from "./tools/index.js";
-
-export type ToolResult = {
-  structuredContent: Record<string, unknown>;
-  logData?: Record<string, unknown>;
-};
-
-export type ToolDef = {
-  name: string;
-  description: string;
-  inputSchema: ZodRawShapeCompat;
-  outputSchema: ZodRawShapeCompat;
-  writesRequired: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  dryRunResult?: (input: any) => Record<string, unknown>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  handler: (input: any) => Promise<ToolResult>;
-};
 
 let mutationQueue: Promise<void> = Promise.resolve();
 
@@ -45,54 +33,42 @@ function withMutationLock<T>(operation: () => Promise<T>): Promise<T> {
   );
   return next;
 }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-function toolErrorResult(error: unknown): {
+export function toolErrorResult(error: unknown): {
   isError: true;
   content: [{ type: "text"; text: string }];
 } {
-  if (error instanceof MusicToolError) {
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            code: error.code,
-            message: error.message,
-            details: error.details,
-          }),
-        },
-      ],
-    };
-  }
+  const payload =
+    error instanceof MusicToolError
+      ? { code: error.code, message: error.message }
+      : { code: "script_error", message: "An unexpected server error occurred." };
+
   return {
     isError: true,
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify({
-          code: "script_error",
-          message: error instanceof Error ? error.message : "Unknown server error",
-        }),
-      },
-    ],
+    content: [{ type: "text", text: JSON.stringify(payload) }],
   };
 }
 
-const allTools: ToolDef[] = [
-  capabilitiesTool,
-  healthTool,
-  listFoldersTool,
-  listPlaylistsTool,
-  createPlaylistTool,
-  createFolderTool,
-  movePlaylistTool,
-  getNowPlayingTool,
-  playbackControlTool,
-  searchLibraryTool,
-  getPlaylistTracksTool,
-  addTracksToPlaylistTool,
-];
+function registerAllTools(server: McpServer): void {
+  registerTool(server, capabilitiesTool);
+  registerTool(server, healthTool);
+  registerTool(server, listFoldersTool);
+  registerTool(server, listPlaylistsTool);
+  registerTool(server, createPlaylistTool);
+  registerTool(server, createPlaylistFromCriteriaTool);
+  registerTool(server, createFolderTool);
+  registerTool(server, movePlaylistTool);
+  registerTool(server, getNowPlayingTool);
+  registerTool(server, playbackControlTool);
+  registerTool(server, searchLibraryTool);
+  registerTool(server, findTracksTool);
+  registerTool(server, getPlaylistTracksTool);
+  registerTool(server, addTracksToPlaylistTool);
+  registerTool(server, removeTracksFromPlaylistTool);
+}
 
 export function createServer(): McpServer {
   const server = new McpServer(
@@ -109,24 +85,24 @@ export function createServer(): McpServer {
     },
   );
 
-  for (const tool of allTools) {
-    registerTool(server, tool);
-  }
+  registerAllTools(server);
 
   return server;
 }
 
-function registerTool(server: McpServer, tool: ToolDef): void {
-  const hasInput = Object.keys(tool.inputSchema).length > 0;
-
-  server.registerTool(
+function registerTool<Input extends ToolSchema, Output extends ToolSchema>(
+  server: McpServer,
+  tool: ToolDef<Input, Output>,
+): void {
+  server.registerTool<Output, Input>(
     tool.name,
     {
       description: tool.description,
-      ...(hasInput ? { inputSchema: tool.inputSchema } : {}),
+      inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
+      annotations: tool.annotations,
     },
-    async (input: any) => {
+    (async (input: ToolSchemaOutput<Input>) => {
       const startedAt = Date.now();
       try {
         // Write gate
@@ -141,9 +117,10 @@ function registerTool(server: McpServer, tool: ToolDef): void {
 
         // Dry run
         if (tool.writesRequired && runtimeConfig.dryRun) {
-          const structuredContent = tool.dryRunResult
-            ? tool.dryRunResult(input)
-            : { dryRun: true, tool: tool.name, input };
+          const structuredContent = tool.dryRunResult(input);
+          if (!isRecord(structuredContent)) {
+            throw new MusicToolError("script_error", "Tool returned a non-object dry-run result.");
+          }
           return {
             content: [
               {
@@ -163,6 +140,10 @@ function registerTool(server: McpServer, tool: ToolDef): void {
         // Execute (with mutation lock for writes)
         const execute = () => tool.handler(input);
         const result = tool.writesRequired ? await withMutationLock(execute) : await execute();
+        const structuredContent = result.structuredContent;
+        if (!isRecord(structuredContent)) {
+          throw new MusicToolError("script_error", "Tool returned a non-object structured result.");
+        }
 
         log("tool_success", {
           tool: tool.name,
@@ -171,8 +152,8 @@ function registerTool(server: McpServer, tool: ToolDef): void {
         });
 
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result.structuredContent) }],
-          structuredContent: result.structuredContent,
+          content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+          structuredContent,
         };
       } catch (error) {
         log("tool_error", {
@@ -182,6 +163,6 @@ function registerTool(server: McpServer, tool: ToolDef): void {
         });
         return toolErrorResult(error);
       }
-    },
+    }) as unknown as ToolCallback<Input>,
   );
 }
