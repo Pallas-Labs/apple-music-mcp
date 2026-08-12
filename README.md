@@ -4,7 +4,7 @@
 [![macOS only](https://img.shields.io/badge/platform-macOS-lightgrey)](https://github.com/parthmangrola/apple-music-mcp)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-MCP server for controlling Apple Music on macOS via AppleScript. Works with Claude Code, Codex CLI, Cursor, and any MCP-compatible client.
+MCP server for controlling Apple Music on macOS via AppleScript. Implements MCP 2026-07-28 and remains compatible with initialization-based 2025 clients over stdio. Works with Claude Code, Codex CLI, Cursor, and other MCP clients.
 
 ## Tools
 
@@ -42,6 +42,18 @@ Remove results contain `playlistId`, `requested`, `removed`, `removedTrackIds`,
 `missingTrackIds`, and `failedTrackIds`. Removal deletes every matching playlist instance, so
 `removed` can exceed `removedTrackIds.length`. Criteria-created playlists also report
 `requested`, `addedTrackIds`, `missingTrackIds`, and `failedTrackIds`.
+
+## Resources and prompts
+
+The server exposes two read-only resources:
+
+- `music://guide` — safe usage, persistent IDs, and write controls
+- `music://now-playing` — current track and playback state as JSON
+
+It also provides two user-invoked prompts:
+
+- `curate-playlist` — plan a bounded library search and approved playlist creation
+- `library-overview` — summarize folders, playlists, and current playback without writes
 
 ## Environment Variables
 
@@ -161,7 +173,7 @@ If you see `permission_denied` errors:
 Development requires Bun 1.3.14.
 
 ```bash
-git clone https://github.com/parthmangrola/apple-music-mcp.git
+git clone https://github.com/Pallas-Labs/apple-music-mcp.git
 cd apple-music-mcp
 bun install --frozen-lockfile
 bun run format:check

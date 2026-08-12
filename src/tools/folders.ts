@@ -17,19 +17,19 @@ const folderSchema = z.object({
   isRoot: z.boolean(),
   parentId: z.string().optional(),
 });
-const listFoldersInputSchema = {
+const listFoldersInputSchema = z.object({
   includeEmpty: z.boolean().optional(),
-};
-const listFoldersOutputSchema = {
+});
+const listFoldersOutputSchema = z.object({
   folders: z.array(folderSchema),
-};
-const createFolderInputSchema = {
+});
+const createFolderInputSchema = z.object({
   name: nameSchema,
   parentId: persistentIdSchema.optional(),
-};
-const createFolderOutputSchema = {
+});
+const createFolderOutputSchema = z.object({
   folder: folderSchema,
-};
+});
 
 export const listFoldersTool = defineTool({
   name: "music.list_folders",

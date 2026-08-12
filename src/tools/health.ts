@@ -61,14 +61,14 @@ async function getMusicHealth(): Promise<MusicHealth> {
   return { musicRunning, permissionGranted, serverVersion: SERVER_VERSION };
 }
 
-const healthInputSchema = {};
-const healthOutputSchema = {
+const healthInputSchema = z.object({});
+const healthOutputSchema = z.object({
   musicRunning: z.boolean(),
   permissionGranted: z.boolean(),
   serverVersion: z.string(),
   writesEnabled: z.boolean(),
   dryRun: z.boolean(),
-};
+});
 
 export const healthTool = defineTool({
   name: "music.health",

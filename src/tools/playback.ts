@@ -9,23 +9,23 @@ import {
   READ_ONLY_ANNOTATIONS,
 } from "../tool-contracts.js";
 
-const getNowPlayingInputSchema = {};
-const getNowPlayingOutputSchema = {
+const getNowPlayingInputSchema = z.object({});
+const getNowPlayingOutputSchema = z.object({
   name: z.string(),
   artist: z.string(),
   album: z.string(),
   duration: z.number(),
   position: z.number(),
   playerState: z.enum(["playing", "paused", "stopped"]),
-};
-const playbackControlInputSchema = {
+});
+const playbackControlInputSchema = z.object({
   action: z.enum(["play", "pause", "next", "previous", "toggle"]),
-};
-const playbackControlOutputSchema = {
+});
+const playbackControlOutputSchema = z.object({
   success: z.boolean(),
   action: z.string(),
   playerState: z.enum(["playing", "paused", "stopped"]),
-};
+});
 
 export const getNowPlayingTool = defineTool({
   name: "music.get_now_playing",
@@ -62,7 +62,7 @@ export const playbackControlTool = defineTool({
   },
 });
 
-async function getNowPlaying(): Promise<NowPlaying> {
+export async function getNowPlaying(): Promise<NowPlaying> {
   const script = buildRawScript(`
 try
     if application "Music" is not running then

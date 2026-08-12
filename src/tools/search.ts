@@ -6,11 +6,11 @@ import { MusicToolError } from "../types.js";
 import type { Track } from "../types.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
 
-const searchLibraryInputSchema = {
+const searchLibraryInputSchema = z.object({
   query: z.string().trim().min(1).max(255).describe("Search query (matches track name or artist)."),
   limit: z.number().int().min(1).max(50).optional().describe("Max results (default 50)."),
-};
-const searchLibraryOutputSchema = {
+});
+const searchLibraryOutputSchema = z.object({
   tracks: z.array(
     z.object({
       id: z.string(),
@@ -20,7 +20,7 @@ const searchLibraryOutputSchema = {
       duration: z.number(),
     }),
   ),
-};
+});
 
 export const searchLibraryTool = defineTool({
   name: "music.search_library",

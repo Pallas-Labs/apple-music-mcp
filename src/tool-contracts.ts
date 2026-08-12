@@ -1,10 +1,4 @@
-import type {
-  AnySchema,
-  SchemaOutput,
-  ShapeOutput,
-  ZodRawShapeCompat,
-} from "@modelcontextprotocol/sdk/server/zod-compat.js";
-import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type { StandardSchemaWithJSON, ToolAnnotations } from "@modelcontextprotocol/server";
 
 export const READ_ONLY_ANNOTATIONS = Object.freeze({
   readOnlyHint: true,
@@ -20,13 +14,9 @@ export const ADDITIVE_WRITE_ANNOTATIONS = Object.freeze({
   openWorldHint: false,
 } satisfies ToolAnnotations);
 
-export type ToolSchema = ZodRawShapeCompat | AnySchema;
+export type ToolSchema = StandardSchemaWithJSON;
 
-export type ToolSchemaOutput<S extends ToolSchema> = S extends ZodRawShapeCompat
-  ? ShapeOutput<S>
-  : S extends AnySchema
-    ? SchemaOutput<S>
-    : never;
+export type ToolSchemaOutput<S extends ToolSchema> = StandardSchemaWithJSON.InferOutput<S>;
 
 export type ToolResult<Output extends ToolSchema> = {
   structuredContent: ToolSchemaOutput<Output>;

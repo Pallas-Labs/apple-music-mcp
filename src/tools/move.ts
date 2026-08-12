@@ -7,11 +7,11 @@ import { MusicToolError } from "../types.js";
 import type { Playlist } from "../types.js";
 import { defineTool } from "../tool-contracts.js";
 
-const movePlaylistInputSchema = {
+const movePlaylistInputSchema = z.object({
   playlistId: persistentIdSchema,
   targetFolderId: persistentIdSchema,
-};
-const movePlaylistOutputSchema = {
+});
+const movePlaylistOutputSchema = z.object({
   playlist: z.object({
     id: z.string(),
     name: z.string(),
@@ -19,7 +19,7 @@ const movePlaylistOutputSchema = {
     isSmart: z.boolean(),
     trackCount: z.number().optional(),
   }),
-};
+});
 
 export const movePlaylistTool = defineTool({
   name: "music.move_playlist",

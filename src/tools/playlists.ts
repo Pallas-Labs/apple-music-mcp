@@ -24,26 +24,26 @@ const playlistSchema = z.object({
   isSmart: z.boolean(),
   trackCount: z.number().optional(),
 });
-const listPlaylistsInputSchema = {
+const listPlaylistsInputSchema = z.object({
   folderId: persistentIdSchema.optional(),
   includeRoot: z.boolean().optional(),
-};
-const listPlaylistsOutputSchema = {
+});
+const listPlaylistsOutputSchema = z.object({
   playlists: z.array(playlistSchema),
-};
-const createPlaylistInputSchema = {
+});
+const createPlaylistInputSchema = z.object({
   name: nameSchema,
   folderId: persistentIdSchema.optional(),
-};
-const createPlaylistOutputSchema = {
+});
+const createPlaylistOutputSchema = z.object({
   playlist: playlistSchema,
-};
-const createPlaylistFromCriteriaInputSchema = {
+});
+const createPlaylistFromCriteriaInputSchema = z.object({
   name: nameSchema,
   folderId: persistentIdSchema.optional(),
   criteria: trackCriteriaSchema,
-};
-const createPlaylistFromCriteriaOutputSchema = {
+});
+const createPlaylistFromCriteriaOutputSchema = z.object({
   playlist: playlistSchema,
   matched: z.number(),
   requested: z.number(),
@@ -53,7 +53,7 @@ const createPlaylistFromCriteriaOutputSchema = {
   failedTrackIds: z.array(z.string()),
   scanned: z.number(),
   truncated: z.boolean(),
-};
+});
 
 export const listPlaylistsTool = defineTool({
   name: "music.list_playlists",

@@ -116,19 +116,19 @@ export const trackCriteriaSchema = z.object(trackCriteriaShape).superRefine((cri
   }
 });
 
-const findTracksOutputSchema = {
+const findTracksOutputSchema = z.object({
   tracks: z.array(libraryTrackSchema),
   totalMatched: z.number(),
   limit: z.number(),
   scanned: z.number(),
   truncated: z.boolean(),
-};
-const getPlaylistTracksInputSchema = {
+});
+const getPlaylistTracksInputSchema = z.object({
   playlistId: persistentIdSchema,
   offset: z.number().int().min(0).optional().describe("Start index (default 0)."),
   limit: z.number().int().min(1).max(100).optional().describe("Max tracks to return (default 50)."),
-};
-const getPlaylistTracksOutputSchema = {
+});
+const getPlaylistTracksOutputSchema = z.object({
   tracks: z.array(
     z.object({
       id: z.string(),
@@ -141,7 +141,7 @@ const getPlaylistTracksOutputSchema = {
   total: z.number(),
   offset: z.number(),
   limit: z.number(),
-};
+});
 export const trackIdsSchema = z
   .array(persistentIdSchema)
   .min(1)
@@ -150,34 +150,34 @@ export const trackIdsSchema = z
     message: "Track IDs must be unique.",
   })
   .describe("Unique persistent IDs of tracks.");
-const trackMutationInputSchema = {
+const trackMutationInputSchema = z.object({
   playlistId: persistentIdSchema,
   trackIds: trackIdsSchema,
-};
-const addTracksOutputSchema = {
+});
+const addTracksOutputSchema = z.object({
   playlistId: z.string(),
   requested: z.number().int().min(0),
   added: z.number().int().min(0),
   addedTrackIds: z.array(z.string()),
   missingTrackIds: z.array(z.string()),
   failedTrackIds: z.array(z.string()),
-};
-const removeTracksOutputSchema = {
+});
+const removeTracksOutputSchema = z.object({
   playlistId: z.string(),
   requested: z.number().int().min(0),
   removed: z.number().int().min(0),
   removedTrackIds: z.array(z.string()),
   missingTrackIds: z.array(z.string()),
   failedTrackIds: z.array(z.string()),
-};
-const addTracksResultSchema = z.object(addTracksOutputSchema);
-const removeTracksResultSchema = z.object(removeTracksOutputSchema);
+});
+const addTracksResultSchema = addTracksOutputSchema;
+const removeTracksResultSchema = removeTracksOutputSchema;
 const findTracksScriptResultSchema = z.object({
   tracks: z.array(libraryTrackSchema),
   scanned: z.number().int().min(0),
   truncated: z.boolean(),
 });
-const playlistTracksResultSchema = z.object(getPlaylistTracksOutputSchema);
+const playlistTracksResultSchema = getPlaylistTracksOutputSchema;
 
 export type FindTracksResult = ToolSchemaOutput<typeof findTracksOutputSchema>;
 export type AddTracksResult = ToolSchemaOutput<typeof addTracksOutputSchema>;

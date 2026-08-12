@@ -2,14 +2,14 @@ import * as z from "zod/v4";
 import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from "../config.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
 
-const capabilitiesInputSchema = {};
-const capabilitiesOutputSchema = {
+const capabilitiesInputSchema = z.object({});
+const capabilitiesOutputSchema = z.object({
   serverName: z.string(),
   serverVersion: z.string(),
   writesEnabled: z.boolean(),
   dryRun: z.boolean(),
   tools: z.array(z.string()),
-};
+});
 
 export const capabilitiesTool = defineTool({
   name: "music.capabilities",

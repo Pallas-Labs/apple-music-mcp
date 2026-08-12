@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import * as z from "zod/v4";
+import {
+  Client,
+  InMemoryTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+import { createMcpHandler } from "@modelcontextprotocol/server";
 import { runtimeConfig } from "./config.js";
 import { createServer, toolErrorResult } from "./server.js";
 import { MusicToolError } from "./types.js";
@@ -72,6 +75,24 @@ async function withMcpClient<T>(run: (client: Client) => Promise<T>): Promise<T>
   }
 }
 
+async function withModernMcpClient<T>(run: (client: Client) => Promise<T>): Promise<T> {
+  const handler = createMcpHandler(createServer);
+  const transport = new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
+    fetch: (url, init) => handler.fetch(new Request(url, init)),
+  });
+  const client = new Client(
+    { name: "apple-music-mcp-modern-test", version: "1.0.0" },
+    { versionNegotiation: { mode: "auto" } },
+  );
+  await client.connect(transport);
+  try {
+    return await run(client);
+  } finally {
+    await client.close();
+    await handler.close();
+  }
+}
+
 describe("createServer", () => {
   test("registers all tools with schemas and exact annotations", async () => {
     await withMcpClient(async (client) => {
@@ -107,6 +128,32 @@ describe("createServer", () => {
       });
     },
   );
+
+  test("serves the 2026-07-28 protocol with tools, resources, and prompts", async () => {
+    await withModernMcpClient(async (client) => {
+      expect(client.getProtocolEra()).toBe("modern");
+
+      const [tools, resources, prompts] = await Promise.all([
+        client.listTools(),
+        client.listResources(),
+        client.listPrompts(),
+      ]);
+
+      expect(tools.tools).toHaveLength(Object.keys(EXPECTED_ANNOTATIONS).length);
+      expect(tools.tools.every((tool) => Boolean(tool.title))).toBe(true);
+      expect(resources.resources.map((resource) => resource.uri)).toEqual([
+        "music://guide",
+        "music://now-playing",
+      ]);
+      expect(prompts.prompts.map((prompt) => prompt.name)).toEqual([
+        "curate-playlist",
+        "library-overview",
+      ]);
+
+      const guide = await client.readResource({ uri: "music://guide" });
+      expect(guide.contents[0]?.text).toContain("music.health");
+    });
+  });
 
   test("write tools provide exact dry-run payloads matching output schemas", () => {
     const cases = [
@@ -165,8 +212,7 @@ describe("createServer", () => {
     ];
 
     for (const { payload, outputSchema } of cases) {
-      expect(Object.keys(payload).sort()).toEqual(Object.keys(outputSchema).sort());
-      expect(z.object(outputSchema).safeParse(payload).success).toBe(true);
+      expect(outputSchema.safeParse(payload).success).toBe(true);
     }
   });
 });

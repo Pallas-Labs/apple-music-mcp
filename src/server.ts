@@ -1,10 +1,12 @@
-import { McpServer, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import type { ToolCallback } from "@modelcontextprotocol/server";
 import type { ToolDef, ToolSchema, ToolSchemaOutput } from "./tool-contracts.js";
 export { defineTool } from "./tool-contracts.js";
 export type { ToolDef, ToolResult } from "./tool-contracts.js";
 import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from "./config.js";
 import { MusicToolError } from "./types.js";
 import { log } from "./logger.js";
+import { registerPrompts, registerResources } from "./mcp-features.js";
 import {
   capabilitiesTool,
   healthTool,
@@ -35,6 +37,14 @@ function withMutationLock<T>(operation: () => Promise<T>): Promise<T> {
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toolTitle(name: string): string {
+  return name
+    .replace(/^music\./, "")
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 export function toolErrorResult(error: unknown): {
@@ -78,14 +88,22 @@ export function createServer(): McpServer {
       version: SERVER_VERSION,
       description:
         "Read/write access to Apple Music playlists, folders, tracks, and playback on macOS. Mutations are non-atomic via AppleScript — partial failures are possible for bulk operations.",
+      websiteUrl: "https://github.com/Pallas-Labs/apple-music-mcp",
     },
     {
+      capabilities: {
+        tools: {},
+        resources: {},
+        prompts: {},
+      },
       instructions:
-        "Use music.health first. Read tools are always safe. Mutation tools require APPLE_MUSIC_MCP_ENABLE_WRITES=true. IDs are persistent IDs from Apple Music.",
+        "Call music.health first. Use music://guide for safe usage. Read tools are always safe. Mutation tools require APPLE_MUSIC_MCP_ENABLE_WRITES=true. IDs are persistent Apple Music IDs.",
     },
   );
 
   registerAllTools(server);
+  registerResources(server);
+  registerPrompts(server);
 
   return server;
 }
@@ -97,6 +115,7 @@ function registerTool<Input extends ToolSchema, Output extends ToolSchema>(
   server.registerTool<Output, Input>(
     tool.name,
     {
+      title: toolTitle(tool.name),
       description: tool.description,
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
