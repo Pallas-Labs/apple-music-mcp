@@ -23,34 +23,45 @@ export type ToolResult<Output extends ToolSchema> = {
   logData?: Record<string, unknown>;
 };
 
-type BaseToolDef<Input extends ToolSchema, Output extends ToolSchema> = {
+type BaseToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = {
   name: string;
   description: string;
   inputSchema: Input;
   outputSchema: Output;
   annotations: ToolAnnotations;
-  handler: (input: ToolSchemaOutput<Input>) => Promise<ToolResult<Output>>;
+  handler: (input: Args) => Promise<ToolResult<Output>>;
 };
 
-type ReadToolDef<Input extends ToolSchema, Output extends ToolSchema> = BaseToolDef<
+type ReadToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = BaseToolDef<
   Input,
-  Output
+  Output,
+  Args
 > & {
   writesRequired: false;
   dryRunResult?: never;
 };
 
-type WriteToolDef<Input extends ToolSchema, Output extends ToolSchema> = BaseToolDef<
+type WriteToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = BaseToolDef<
   Input,
-  Output
+  Output,
+  Args
 > & {
   writesRequired: true;
-  dryRunResult: (input: ToolSchemaOutput<Input>) => ToolSchemaOutput<Output>;
+  dryRunResult: (input: Args) => ToolSchemaOutput<Output>;
 };
 
-export type ToolDef<Input extends ToolSchema, Output extends ToolSchema> =
-  | ReadToolDef<Input, Output>
-  | WriteToolDef<Input, Output>;
+export type ToolDef<
+  Input extends ToolSchema,
+  Output extends ToolSchema,
+  Args = ToolSchemaOutput<Input>,
+> = ReadToolDef<Input, Output, Args> | WriteToolDef<Input, Output, Args>;
+
+/**
+ * A tool with its schema types erased, so tools with different schemas share one array.
+ * Its handlers accept `never`: only the registration callback may call them, because the SDK
+ * has already parsed the arguments with the same tool's `inputSchema`.
+ */
+export type AnyToolDef = ToolDef<ToolSchema, ToolSchema, never>;
 
 export function defineTool<Input extends ToolSchema, Output extends ToolSchema>(
   definition: ToolDef<Input, Output>,

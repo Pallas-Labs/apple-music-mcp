@@ -108,6 +108,14 @@ describe("createServer", () => {
     });
   });
 
+  test("music.capabilities lists every registered tool in order", async () => {
+    await withMcpClient(async (client) => {
+      const response = await client.callTool({ name: "music.capabilities", arguments: {} });
+      expect(response.isError).toBeFalsy();
+      expect(response.structuredContent?.tools).toEqual(Object.keys(EXPECTED_ANNOTATIONS));
+    });
+  });
+
   test.skipIf(runtimeConfig.writesEnabled)(
     "rejects writes before executing AppleScript",
     async () => {

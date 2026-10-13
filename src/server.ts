@@ -1,29 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import type { ToolCallback } from "@modelcontextprotocol/server";
-import type { ToolDef, ToolSchema, ToolSchemaOutput } from "./tool-contracts.js";
+import type { AnyToolDef, ToolSchema } from "./tool-contracts.js";
 export { defineTool } from "./tool-contracts.js";
 export type { ToolDef, ToolResult } from "./tool-contracts.js";
 import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from "./config.js";
 import { MusicToolError } from "./types.js";
 import { log } from "./logger.js";
 import { registerPrompts, registerResources } from "./mcp-features.js";
-import {
-  capabilitiesTool,
-  healthTool,
-  listFoldersTool,
-  listPlaylistsTool,
-  createPlaylistTool,
-  createPlaylistFromCriteriaTool,
-  createFolderTool,
-  movePlaylistTool,
-  getNowPlayingTool,
-  playbackControlTool,
-  searchLibraryTool,
-  findTracksTool,
-  getPlaylistTracksTool,
-  addTracksToPlaylistTool,
-  removeTracksFromPlaylistTool,
-} from "./tools/index.js";
+import { allTools } from "./tools/index.js";
 
 let mutationQueue: Promise<void> = Promise.resolve();
 
@@ -62,24 +46,6 @@ export function toolErrorResult(error: unknown): {
   };
 }
 
-function registerAllTools(server: McpServer): void {
-  registerTool(server, capabilitiesTool);
-  registerTool(server, healthTool);
-  registerTool(server, listFoldersTool);
-  registerTool(server, listPlaylistsTool);
-  registerTool(server, createPlaylistTool);
-  registerTool(server, createPlaylistFromCriteriaTool);
-  registerTool(server, createFolderTool);
-  registerTool(server, movePlaylistTool);
-  registerTool(server, getNowPlayingTool);
-  registerTool(server, playbackControlTool);
-  registerTool(server, searchLibraryTool);
-  registerTool(server, findTracksTool);
-  registerTool(server, getPlaylistTracksTool);
-  registerTool(server, addTracksToPlaylistTool);
-  registerTool(server, removeTracksFromPlaylistTool);
-}
-
 export function createServer(): McpServer {
   const server = new McpServer(
     {
@@ -101,18 +67,15 @@ export function createServer(): McpServer {
     },
   );
 
-  registerAllTools(server);
+  for (const tool of allTools) registerTool(server, tool);
   registerResources(server);
   registerPrompts(server);
 
   return server;
 }
 
-function registerTool<Input extends ToolSchema, Output extends ToolSchema>(
-  server: McpServer,
-  tool: ToolDef<Input, Output>,
-): void {
-  server.registerTool<Output, Input>(
+function registerTool(server: McpServer, tool: AnyToolDef): void {
+  server.registerTool<ToolSchema, ToolSchema>(
     tool.name,
     {
       title: toolTitle(tool.name),
@@ -121,7 +84,7 @@ function registerTool<Input extends ToolSchema, Output extends ToolSchema>(
       outputSchema: tool.outputSchema,
       annotations: tool.annotations,
     },
-    (async (input: ToolSchemaOutput<Input>) => {
+    (async (input: never) => {
       const startedAt = Date.now();
       try {
         // Write gate
@@ -182,6 +145,6 @@ function registerTool<Input extends ToolSchema, Output extends ToolSchema>(
         });
         return toolErrorResult(error);
       }
-    }) as unknown as ToolCallback<Input>,
+    }) as unknown as ToolCallback<ToolSchema>,
   );
 }
