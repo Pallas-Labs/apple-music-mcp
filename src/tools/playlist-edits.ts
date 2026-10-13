@@ -1,4 +1,5 @@
 import * as z from "zod/v4";
+import { acceptedContent, inputRequired, inputResponse } from "@modelcontextprotocol/server";
 import { nameSchema, persistentIdSchema } from "../config.js";
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
@@ -11,17 +12,23 @@ import { playlistSchema } from "./playlists.js";
 
 const PLAYLIST_KINDS = ["user", "folder", "subscription", "system"] as const;
 type PlaylistKind = (typeof PLAYLIST_KINDS)[number];
-type PlaylistEdit = "rename";
+type PlaylistEdit = "rename" | "delete";
 
 /** Why each kind of playlist refuses an edit. A kind with no entry allows that edit. */
 const EDIT_REFUSALS: Record<PlaylistKind, Partial<Record<PlaylistEdit, string>>> = {
   user: {},
-  folder: {},
+  folder: {
+    delete:
+      "is a folder. Deleting a folder also deletes every playlist inside it, so delete those playlists one at a time instead.",
+  },
   subscription: {
     rename: "is an Apple Music playlist saved to your library, and only its curator can rename it.",
+    delete:
+      "is an Apple Music playlist saved to your library. Remove it from your library in Music.",
   },
   system: {
     rename: "is a built-in playlist that Music manages, so it cannot be renamed.",
+    delete: "is a built-in playlist that Music manages, so it cannot be deleted.",
   },
 };
 
@@ -59,6 +66,27 @@ const renamePlaylistInputSchema = z.object({
   name: nameSchema.describe("New name, 1-255 characters."),
 });
 const renamePlaylistOutputSchema = z.object({ playlist: playlistSchema });
+
+const deletePlaylistInputSchema = z.object({
+  playlistId: persistentIdSchema.describe(
+    "Persistent playlist ID from music.list_playlists or music.create_playlist. Folders are refused.",
+  ),
+  confirm: z
+    .boolean()
+    .optional()
+    .describe(
+      "Set true only after the user approves this deletion. Used only when the client cannot show a confirmation prompt.",
+    ),
+});
+const deletePlaylistOutputSchema = z.object({
+  deletedPlaylistId: z.string().describe("Persistent ID of the deleted playlist."),
+  name: z.string().describe("Name of the deleted playlist."),
+});
+
+const DELETE_CONFIRMATION_KEY = "confirmDelete";
+const deleteConfirmationSchema = z.object({
+  confirm: z.boolean().describe("Delete the playlist"),
+});
 
 /**
  * Build a script that finds a playlist by ID, runs `edit` when the playlist's kind allows it, and
@@ -158,10 +186,33 @@ export function createPlaylistEditOperations(run: typeof runAppleScript = runApp
         `set name of p to "${escapeAppleScriptString(name)}"
                 set pName to name of p as text`,
       ),
+    // Music sometimes answers delete with an AppleEvent timeout (-1712) after it has deleted the
+    // playlist, so a timeout counts as success once the playlist is gone.
+    delete: (playlistId: string) =>
+      editPlaylist(
+        playlistId,
+        "delete",
+        `try
+                    delete p
+                on error errMsg number errNum
+                    if errNum is not -1712 then error errMsg number errNum
+                    repeat 40 times
+                        if (count of (every playlist whose persistent ID is pId)) is 0 then exit repeat
+                        delay 0.25
+                    end repeat
+                    if (count of (every playlist whose persistent ID is pId)) is not 0 then error errMsg number errNum
+                end try`,
+      ),
   };
 }
 
+type PlaylistEditOperations = ReturnType<typeof createPlaylistEditOperations>;
+
 const playlistEditOperations = createPlaylistEditOperations();
+
+function describeTracks(count: number): string {
+  return count === 1 ? "1 track" : `${count} tracks`;
+}
 
 function toPlaylist(info: PlaylistInfo): Playlist {
   return {
@@ -189,3 +240,68 @@ export const renamePlaylistTool = defineTool({
     return { structuredContent: { playlist }, logData: { playlistId } };
   },
 });
+
+export function createDeletePlaylistTool(
+  operations: PlaylistEditOperations = playlistEditOperations,
+) {
+  return defineTool({
+    name: "music.delete_playlist",
+    description:
+      "Delete a user playlist after the user confirms. Folders are refused. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.\nClients that support elicitation always show a confirmation prompt; other clients must pass confirm: true.",
+    inputSchema: deletePlaylistInputSchema,
+    outputSchema: deletePlaylistOutputSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    writesRequired: true,
+    dryRunResult({ playlistId }) {
+      return { deletedPlaylistId: playlistId, name: "DRY_RUN_PLAYLIST" };
+    },
+    async handler({ playlistId, confirm }, { canElicit, inputResponses }) {
+      const playlist = await operations.describe(playlistId);
+      assertEditable(playlist, "delete");
+      const summary = `"${playlist.name}" (${describeTracks(playlist.trackCount)})`;
+
+      if (canElicit) {
+        if (inputResponse(inputResponses, DELETE_CONFIRMATION_KEY).kind === "missing") {
+          return inputRequired({
+            inputRequests: {
+              [DELETE_CONFIRMATION_KEY]: inputRequired.elicit({
+                message: `Delete the playlist ${summary}? Its tracks stay in your library. This cannot be undone.`,
+                requestedSchema: deleteConfirmationSchema,
+              }),
+            },
+          });
+        }
+        const answer = acceptedContent(
+          inputResponses,
+          DELETE_CONFIRMATION_KEY,
+          deleteConfirmationSchema,
+        );
+        if (answer?.confirm !== true) {
+          throw new MusicToolError("validation_error", "Deletion cancelled. Nothing was deleted.");
+        }
+      } else if (confirm !== true) {
+        throw new MusicToolError(
+          "validation_error",
+          `This client cannot show a confirmation prompt. Ask the user to approve deleting ${summary}, then call again with confirm: true.`,
+        );
+      }
+
+      const deleted = await operations.delete(playlistId);
+      return {
+        structuredContent: { deletedPlaylistId: deleted.id, name: deleted.name },
+        logData: {
+          playlistId,
+          trackCount: deleted.trackCount,
+          confirmedBy: canElicit ? "elicitation" : "argument",
+        },
+      };
+    },
+  });
+}
+
+export const deletePlaylistTool = createDeletePlaylistTool();

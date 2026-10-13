@@ -53,6 +53,26 @@ describe("buildPlaylistScript", () => {
   });
 });
 
+describe("createPlaylistEditOperations.delete", () => {
+  test("deletes only user playlists inside the same script that classifies them", async () => {
+    const { scripts, operations } = recordingRunner(
+      playlistPayload({ kind: "user", applied: true }),
+    );
+    const info = await operations.delete("ABCDEF1234567890");
+    expect(info.name).toBe("Road Trip");
+    expect(scripts[0]).toContain('if {"user"} contains pKind then');
+    expect(scripts[0]).toContain("delete p\n");
+  });
+
+  test("refuses folders, subscriptions, and built-in playlists", async () => {
+    for (const kind of ["folder", "subscription", "system"] as const) {
+      const { operations } = recordingRunner(playlistPayload({ kind, applied: false }));
+      const error = await errorOf(operations.delete("ABCDEF1234567890"));
+      expect(error.code).toBe("validation_error");
+    }
+  });
+});
+
 describe("createPlaylistEditOperations.rename", () => {
   test("escapes the new name and returns the renamed playlist", async () => {
     const { scripts, operations } = recordingRunner(

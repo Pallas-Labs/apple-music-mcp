@@ -11,6 +11,7 @@ import {
 import { createMcpHandler, inputRequired, inputResponse } from "@modelcontextprotocol/server";
 import { runtimeConfig } from "./config.js";
 import { createServer, defineTool, toolErrorResult, type CreateServerOptions } from "./server.js";
+import { createDeletePlaylistTool, createPlaylistEditOperations } from "./tools/playlist-edits.js";
 import { MusicToolError } from "./types.js";
 import {
   addTracksToPlaylistTool,
@@ -19,6 +20,7 @@ import {
   createPlaylistTool,
   movePlaylistTool,
   renamePlaylistTool,
+  deletePlaylistTool,
   playbackControlTool,
   playTool,
   setPlayerTool,
@@ -43,7 +45,7 @@ const IDEMPOTENT_ANNOTATIONS = {
   idempotentHint: true,
   openWorldHint: false,
 };
-const REIDEMPOTENT_ANNOTATIONS = {
+const DESTRUCTIVE_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: true,
   idempotentHint: true,
@@ -60,6 +62,7 @@ const EXPECTED_ANNOTATIONS = {
   "music.create_folder": ADDITIVE_ANNOTATIONS,
   "music.move_playlist": IDEMPOTENT_ANNOTATIONS,
   "music.rename_playlist": IDEMPOTENT_ANNOTATIONS,
+  "music.delete_playlist": DESTRUCTIVE_ANNOTATIONS,
   "music.get_now_playing": READ_ANNOTATIONS,
   "music.playback_control": ADDITIVE_ANNOTATIONS,
   "music.play": ADDITIVE_ANNOTATIONS,
@@ -68,7 +71,7 @@ const EXPECTED_ANNOTATIONS = {
   "music.find_tracks": READ_ANNOTATIONS,
   "music.get_playlist_tracks": READ_ANNOTATIONS,
   "music.add_tracks_to_playlist": ADDITIVE_ANNOTATIONS,
-  "music.remove_tracks_from_playlist": REIDEMPOTENT_ANNOTATIONS,
+  "music.remove_tracks_from_playlist": DESTRUCTIVE_ANNOTATIONS,
 } as const;
 
 type TestClientOptions = {
@@ -352,6 +355,10 @@ describe("createServer", () => {
         outputSchema: renamePlaylistTool.outputSchema,
       },
       {
+        payload: deletePlaylistTool.dryRunResult({ playlistId: "ABCDEF1234567890" }),
+        outputSchema: deletePlaylistTool.outputSchema,
+      },
+      {
         payload: playbackControlTool.dryRunResult({ action: "play" }),
         outputSchema: playbackControlTool.outputSchema,
       },
@@ -395,6 +402,148 @@ describe("createServer", () => {
     for (const { payload, outputSchema } of cases) {
       expect(outputSchema.safeParse(payload).success).toBe(true);
     }
+  });
+});
+
+describe("music.delete_playlist confirmation", () => {
+  const PLAYLIST_ID = "ABCDEF1234567890";
+
+  function deleteServer(kind: "user" | "folder" = "user", config = WRITES_ENABLED) {
+    const deletedIds: string[] = [];
+    const operations = createPlaylistEditOperations(async (script) => {
+      const deleting = script.includes("delete p");
+      if (deleting) deletedIds.push(PLAYLIST_ID);
+      return {
+        stdout: JSON.stringify({
+          found: true,
+          id: PLAYLIST_ID,
+          name: "Road Trip",
+          kind,
+          isSmart: false,
+          trackCount: 12,
+          folderId: "",
+          applied: deleting,
+        }),
+        stderr: "",
+      };
+    });
+    return { deletedIds, server: { config, tools: [createDeletePlaylistTool(operations)] } };
+  }
+
+  function callDelete(client: Client, args: Record<string, unknown> = {}) {
+    return client.callTool({
+      name: "music.delete_playlist",
+      arguments: { playlistId: PLAYLIST_ID, ...args },
+    });
+  }
+
+  function errorPayload(response: Awaited<ReturnType<typeof callDelete>>) {
+    expect(response.isError).toBe(true);
+    const content = response.content[0];
+    if (!content || content.type !== "text") throw new Error("Expected text error content.");
+    return JSON.parse(content.text) as { code: string; message: string };
+  }
+
+  for (const [era, withClient] of [
+    ["2025-era", withMcpClient],
+    ["2026-07-28", withModernMcpClient],
+  ] as const) {
+    test(`${era} client with elicitation deletes only after the user accepts`, async () => {
+      const { deletedIds, server } = deleteServer();
+      const prompts: string[] = [];
+      // confirm: true must not skip the prompt when the client can show one.
+      const accepted = await withClient((client) => callDelete(client, { confirm: true }), {
+        server,
+        elicit: (params) => {
+          prompts.push(params.message);
+          return { action: "accept", content: { confirm: true } };
+        },
+      });
+      expect(accepted.isError).toBeFalsy();
+      expect(accepted.structuredContent).toEqual({
+        deletedPlaylistId: PLAYLIST_ID,
+        name: "Road Trip",
+      });
+      expect(deletedIds).toEqual([PLAYLIST_ID]);
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).toContain('"Road Trip" (12 tracks)');
+    });
+
+    test(`${era} client that declines or unticks the prompt deletes nothing`, async () => {
+      const answers: ElicitResult[] = [
+        { action: "decline" },
+        { action: "cancel" },
+        { action: "accept", content: { confirm: false } },
+      ];
+      for (const answer of answers) {
+        const { deletedIds, server } = deleteServer();
+        const response = await withClient((client) => callDelete(client), {
+          server,
+          elicit: () => answer,
+        });
+        expect(errorPayload(response)).toEqual({
+          code: "validation_error",
+          message: "Deletion cancelled. Nothing was deleted.",
+        });
+        expect(deletedIds).toEqual([]);
+      }
+    });
+
+    test(`${era} client without elicitation must pass confirm: true`, async () => {
+      const unconfirmed = deleteServer();
+      const refused = await withClient((client) => callDelete(client), {
+        server: unconfirmed.server,
+      });
+      const error = errorPayload(refused);
+      expect(error.code).toBe("validation_error");
+      expect(error.message).toContain("confirm: true");
+      expect(unconfirmed.deletedIds).toEqual([]);
+
+      const confirmed = deleteServer();
+      const deleted = await withClient((client) => callDelete(client, { confirm: true }), {
+        server: confirmed.server,
+      });
+      expect(deleted.structuredContent).toEqual({
+        deletedPlaylistId: PLAYLIST_ID,
+        name: "Road Trip",
+      });
+      expect(confirmed.deletedIds).toEqual([PLAYLIST_ID]);
+    });
+  }
+
+  test("refuses folders before prompting", async () => {
+    const { deletedIds, server } = deleteServer("folder");
+    const prompts: string[] = [];
+    const response = await withMcpClient((client) => callDelete(client, { confirm: true }), {
+      server,
+      elicit: (params) => {
+        prompts.push(params.message);
+        return { action: "accept", content: { confirm: true } };
+      },
+    });
+    const error = errorPayload(response);
+    expect(error.code).toBe("validation_error");
+    expect(error.message).toStartWith('"Road Trip" is a folder.');
+    expect(prompts).toEqual([]);
+    expect(deletedIds).toEqual([]);
+  });
+
+  test("dry run returns the preview without prompting or deleting", async () => {
+    const { deletedIds, server } = deleteServer("user", { writesEnabled: true, dryRun: true });
+    const prompts: string[] = [];
+    const response = await withMcpClient((client) => callDelete(client), {
+      server,
+      elicit: (params) => {
+        prompts.push(params.message);
+        return { action: "accept", content: { confirm: true } };
+      },
+    });
+    expect(response.structuredContent).toEqual({
+      deletedPlaylistId: PLAYLIST_ID,
+      name: "DRY_RUN_PLAYLIST",
+    });
+    expect(prompts).toEqual([]);
+    expect(deletedIds).toEqual([]);
   });
 });
 
