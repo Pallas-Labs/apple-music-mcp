@@ -33,13 +33,23 @@ function normalizeAppleScriptStdout(stdout: string): string {
   return trimmed;
 }
 
-export type ExecFn = (script: string, timeoutMs: number) => Promise<AppleScriptExecResult>;
+export type ScriptLanguage = "AppleScript" | "JavaScript";
 
-const defaultExecFn: ExecFn = async (script, timeoutMs) => {
-  const { stdout, stderr } = await execFileAsync("osascript", ["-s", "s", "-e", script], {
+export type ExecFn = (
+  script: string,
+  timeoutMs: number,
+  language: ScriptLanguage,
+) => Promise<AppleScriptExecResult>;
+
+const defaultExecFn: ExecFn = async (script, timeoutMs, language) => {
+  // JXA prints its string result raw, so it skips the source-form quoting AppleScript needs.
+  const languageArgs =
+    language === "JavaScript" ? ["-l", "JavaScript", "-e", script] : ["-s", "s", "-e", script];
+  const { stdout, stderr } = await execFileAsync("osascript", languageArgs, {
     encoding: "utf8",
     timeout: timeoutMs,
-    maxBuffer: 8 * 1024 * 1024,
+    // Bulk track reads can return tens of thousands of JSON rows.
+    maxBuffer: 64 * 1024 * 1024,
   });
   return {
     stdout: stdout.trim(),
@@ -99,13 +109,14 @@ export function mapAppleScriptError(error: AppleScriptExecError): MusicToolError
   });
 }
 
-export async function runAppleScript(
+async function runScript(
   script: string,
-  timeoutMs = 15_000,
-  execFn: ExecFn = defaultExecFn,
+  timeoutMs: number,
+  language: ScriptLanguage,
+  execFn: ExecFn,
 ): Promise<AppleScriptExecResult> {
   try {
-    const result = await execFn(script, timeoutMs);
+    const result = await execFn(script, timeoutMs, language);
     return {
       stdout: normalizeAppleScriptStdout(result.stdout),
       stderr: result.stderr.trim(),
@@ -113,4 +124,21 @@ export async function runAppleScript(
   } catch (error) {
     throw mapAppleScriptError(error as AppleScriptExecError);
   }
+}
+
+export function runAppleScript(
+  script: string,
+  timeoutMs = 15_000,
+  execFn: ExecFn = defaultExecFn,
+): Promise<AppleScriptExecResult> {
+  return runScript(script, timeoutMs, "AppleScript", execFn);
+}
+
+/** Run a JXA script. Errors surface with the same AppleScript error numbers. */
+export function runJavaScript(
+  script: string,
+  timeoutMs = 15_000,
+  execFn: ExecFn = defaultExecFn,
+): Promise<AppleScriptExecResult> {
+  return runScript(script, timeoutMs, "JavaScript", execFn);
 }

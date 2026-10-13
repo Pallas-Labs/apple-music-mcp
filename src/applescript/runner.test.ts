@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { runAppleScript, parseAppleScriptErrorNumber, mapAppleScriptError } from "./runner.js";
+import {
+  runAppleScript,
+  runJavaScript,
+  parseAppleScriptErrorNumber,
+  mapAppleScriptError,
+} from "./runner.js";
 import type { ExecFn } from "./runner.js";
 import { MusicToolError } from "../types.js";
 
@@ -105,17 +110,30 @@ describe("runAppleScript", () => {
     }
   });
 
-  test("passes script and timeout to exec function", async () => {
-    let receivedScript = "";
-    let receivedTimeout = 0;
-    const mockExec: ExecFn = async (script, timeout) => {
-      receivedScript = script;
-      receivedTimeout = timeout;
+  test("passes script, timeout, and language to exec function", async () => {
+    const received: unknown[] = [];
+    const mockExec: ExecFn = async (script, timeout, language) => {
+      received.push([script, timeout, language]);
       return { stdout: "", stderr: "" };
     };
     await runAppleScript("test-script", 42_000, mockExec);
-    expect(receivedScript).toBe("test-script");
-    expect(receivedTimeout).toBe(42_000);
+    await runJavaScript("js-script", 7_000, mockExec);
+    expect(received).toEqual([
+      ["test-script", 42_000, "AppleScript"],
+      ["js-script", 7_000, "JavaScript"],
+    ]);
+  });
+
+  test("maps JXA errors through the AppleScript error numbers", async () => {
+    const mockExec: ExecFn = async () => {
+      const err = new Error("exec") as any;
+      err.code = 1;
+      err.stderr = "execution error: Error: Error: Can't get object. (-1728)";
+      throw err;
+    };
+    await expect(runJavaScript("script", 5000, mockExec)).rejects.toMatchObject({
+      code: "not_found",
+    });
   });
 
   test("normalizes quoted scalar stdout", async () => {

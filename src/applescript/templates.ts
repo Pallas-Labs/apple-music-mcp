@@ -50,6 +50,24 @@ export function buildScript(body: string): string {
   return `${PREAMBLE}\n${body}\n${SHARED_HANDLERS}`;
 }
 
+const JXA_PREAMBLE = `
+const music = Application("Music");
+if (!music.running()) {
+    music.launch();
+}
+for (let attempt = 0; attempt < 50 && !music.running(); attempt += 1) {
+    delay(0.1);
+}
+`;
+
+/**
+ * Build a complete JXA script from a body block.
+ * Prepends the "ensure Music is running" preamble, which binds `music` for the body to use.
+ */
+export function buildJavaScript(body: string): string {
+  return `${JXA_PREAMBLE}\n${body}`;
+}
+
 /** Build a script that doesn't need the Music preamble (e.g. health checks). */
 export function buildRawScript(body: string): string {
   return body;
