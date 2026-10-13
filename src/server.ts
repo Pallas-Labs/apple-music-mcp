@@ -81,7 +81,8 @@ export function createServer({
     },
   );
 
-  for (const tool of tools) registerTool(server, tool, config);
+  const serverInfo: ServerInfo = { config, toolNames: tools.map((tool) => tool.name) };
+  for (const tool of tools) registerTool(server, tool, serverInfo);
   registerResources(server);
   registerPrompts(server);
 
@@ -97,9 +98,13 @@ function clientCapabilities(server: McpServer, ctx: ServerContext): ClientCapabi
   return envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities();
 }
 
-function toolContext(server: McpServer, ctx: ServerContext): ToolContext {
+/** The parts of ToolContext fixed when the server is created. */
+type ServerInfo = Pick<ToolContext, "config" | "toolNames">;
+
+function toolContext(server: McpServer, ctx: ServerContext, serverInfo: ServerInfo): ToolContext {
   const elicitation = clientCapabilities(server, ctx)?.elicitation;
   return {
+    ...serverInfo,
     // An elicitation capability with neither mode listed means form mode.
     canElicit:
       elicitation !== undefined &&
@@ -108,7 +113,8 @@ function toolContext(server: McpServer, ctx: ServerContext): ToolContext {
   };
 }
 
-function registerTool(server: McpServer, tool: AnyToolDef, config: RuntimeConfig): void {
+function registerTool(server: McpServer, tool: AnyToolDef, serverInfo: ServerInfo): void {
+  const { config } = serverInfo;
   server.registerTool<ToolSchema, ToolSchema>(
     tool.name,
     {
@@ -155,7 +161,7 @@ function registerTool(server: McpServer, tool: AnyToolDef, config: RuntimeConfig
 
         // Each round of a multi-round call takes the lock separately, so no lock is held while the
         // client waits on the user.
-        const context = toolContext(server, ctx);
+        const context = toolContext(server, ctx, serverInfo);
         const execute = () => tool.handler(input, context);
         const lockCall = tool.writesRequired && tool.lock !== "handler";
         const result = lockCall ? await withMutationLock(execute) : await execute();

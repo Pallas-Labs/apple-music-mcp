@@ -3,6 +3,7 @@ import type {
   StandardSchemaWithJSON,
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
+import type { RuntimeConfig } from "./config.js";
 
 export const READ_ONLY_ANNOTATIONS = Object.freeze({
   readOnlyHint: true,
@@ -45,6 +46,10 @@ export type ToolContext = {
   canElicit: boolean;
   /** Client responses to the input requests that an earlier round of this call returned. */
   inputResponses: Record<string, unknown> | undefined;
+  /** The configuration the server was created with. */
+  config: RuntimeConfig;
+  /** Names of the tools the server registered, in registration order. */
+  toolNames: readonly string[];
 };
 
 type BaseToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = {

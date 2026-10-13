@@ -1,8 +1,6 @@
 import * as z from "zod/v4";
-import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from "../config.js";
+import { SERVER_NAME, SERVER_VERSION } from "../config.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
-// Circular import: `allTools` is read only when the handler runs, after both modules load.
-import { allTools } from "./index.js";
 
 const capabilitiesInputSchema = z.object({});
 const capabilitiesOutputSchema = z.object({
@@ -20,13 +18,13 @@ export const capabilitiesTool = defineTool({
   outputSchema: capabilitiesOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
-  async handler() {
+  async handler(_input, { config, toolNames }) {
     const capabilities = {
       serverName: SERVER_NAME,
       serverVersion: SERVER_VERSION,
-      writesEnabled: runtimeConfig.writesEnabled,
-      dryRun: runtimeConfig.dryRun,
-      tools: allTools.map((tool) => tool.name),
+      writesEnabled: config.writesEnabled,
+      dryRun: config.dryRun,
+      tools: [...toolNames],
     };
     return { structuredContent: capabilities };
   },

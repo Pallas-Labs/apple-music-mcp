@@ -16,6 +16,7 @@ import { createCriteriaPlaylistTool } from "./tools/playlists.js";
 import { MusicToolError } from "./types.js";
 import {
   addTracksToPlaylistTool,
+  capabilitiesTool,
   createPlaylistFromCriteriaTool,
   createFolderTool,
   createPlaylistTool,
@@ -188,6 +189,19 @@ describe("createServer", () => {
       const response = await client.callTool({ name: "music.capabilities", arguments: {} });
       expect(response.isError).toBeFalsy();
       expect(response.structuredContent?.tools).toEqual(Object.keys(EXPECTED_ANNOTATIONS));
+    });
+  });
+
+  test("music.capabilities reports the tools and config the server was created with", async () => {
+    const config = { writesEnabled: true, dryRun: true };
+    const response = await withMcpClient(
+      (client) => client.callTool({ name: "music.capabilities", arguments: {} }),
+      { server: { config, tools: [askTool, capabilitiesTool] } },
+    );
+    expect(response.structuredContent).toMatchObject({
+      writesEnabled: true,
+      dryRun: true,
+      tools: ["test.ask", "music.capabilities"],
     });
   });
 

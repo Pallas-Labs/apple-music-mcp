@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { SERVER_VERSION, runtimeConfig } from "../config.js";
+import { SERVER_VERSION } from "../config.js";
 import { runAppleScript } from "../applescript/runner.js";
 import { MusicToolError } from "../types.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
@@ -81,12 +81,12 @@ export const healthTool = defineTool({
   outputSchema: healthOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
-  async handler() {
+  async handler(_input, { config }) {
     const health = await getMusicHealth();
     const response = {
       ...health,
-      writesEnabled: runtimeConfig.writesEnabled,
-      dryRun: runtimeConfig.dryRun,
+      writesEnabled: config.writesEnabled,
+      dryRun: config.dryRun,
     };
     return {
       structuredContent: response,
