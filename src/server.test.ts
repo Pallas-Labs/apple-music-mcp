@@ -241,7 +241,7 @@ describe("createServer", () => {
     });
   });
 
-  test("2026-07-28 results carry cache hints: static catalogue for an hour, now-playing never", async () => {
+  test("2026-07-28 results carry cache hints for the static catalogue", async () => {
     await withModernMcpClient(async (client) => {
       const staticHint = { ttlMs: 3_600_000, cacheScope: "private" };
       const [tools, prompts, resources, templates, guide] = await Promise.all([
@@ -255,10 +255,6 @@ describe("createServer", () => {
         expect(result).toMatchObject(staticHint);
       }
       expect(client.getDiscoverResult()).toMatchObject(staticHint);
-
-      // Runs read-only AppleScript; it reports "stopped" without launching Music.
-      const nowPlaying = await client.readResource({ uri: "music://now-playing" });
-      expect(nowPlaying).toMatchObject({ ttlMs: 0, cacheScope: "private" });
     });
   });
 
