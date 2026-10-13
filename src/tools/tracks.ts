@@ -269,11 +269,20 @@ const removeTracksOutputSchema = z.object({
 });
 const addTracksResultSchema = addTracksOutputSchema;
 const removeTracksResultSchema = removeTracksOutputSchema;
-const findTracksScriptResultSchema = z.object({
-  tracks: z.array(libraryTrackSchema),
-  scanned: z.number().int().min(0),
-  truncated: z.boolean(),
-});
+const findTracksPageSchema = z.array(libraryTrackSchema);
+
+/** Column name in the find_tracks payload and its element type. */
+const TRACK_COLUMNS = [
+  ["ids", "string"],
+  ["names", "string"],
+  ["artists", "string"],
+  ["albums", "string"],
+  ["genres", "string"],
+  ["durations", "number"],
+  ["years", "number"],
+  ["playCounts", "number"],
+] as const;
+type TrackColumns = Record<(typeof TRACK_COLUMNS)[number][0], unknown[]>;
 const playlistTracksResultSchema = getPlaylistTracksOutputSchema;
 
 export type FindTracksResult = ToolSchemaOutput<typeof findTracksOutputSchema>;
@@ -405,56 +414,97 @@ const whose = ${whoseLiteral};
 const library = music.libraryPlaylists[0];
 const candidates = whose ? library.tracks.whose(whose) : library.tracks;
 let candidateCount = candidates.length;
-const tracks = [];
+let columns = { ids: [], names: [], artists: [], albums: [], genres: [], durations: [], years: [], playCounts: [] };
 if (candidateCount > 0) {
-    const ids = candidates.persistentID();
-    const names = candidates.name();
-    const artists = candidates.artist();
-    const albums = candidates.album();
-    const genres = candidates.genre();
-    const durations = candidates.duration();
-    const years = candidates.year();
-    const playCounts = candidates.playedCount();
-    const columns = [names, artists, albums, genres, durations, years, playCounts];
-    if (columns.some((column) => column.length !== ids.length)) {
-        throw new Error("Music library changed while reading tracks.");
-    }
-    candidateCount = ids.length;
-    for (let i = 0; i < Math.min(candidateCount, ${FIND_TRACKS_CANDIDATE_CAP}); i += 1) {
-        tracks.push({
-            id: ids[i],
-            name: names[i],
-            artist: artists[i],
-            album: albums[i],
-            genre: genres[i],
-            duration: durations[i],
-            year: years[i],
-            playCount: playCounts[i],
-        });
+    columns = {
+        ids: candidates.persistentID(),
+        names: candidates.name(),
+        artists: candidates.artist(),
+        albums: candidates.album(),
+        genres: candidates.genre(),
+        durations: candidates.duration(),
+        years: candidates.year(),
+        playCounts: candidates.playedCount(),
+    };
+    candidateCount = columns.ids.length;
+    for (const name of Object.keys(columns)) {
+        if (columns[name].length !== candidateCount) {
+            throw new Error("Music library changed while reading tracks.");
+        }
+        columns[name] = columns[name].slice(0, ${FIND_TRACKS_CANDIDATE_CAP});
     }
 }
-JSON.stringify({ tracks, scanned: tracks.length, truncated: candidateCount > tracks.length });`;
+JSON.stringify({ columns, scanned: columns.ids.length, truncated: candidateCount > columns.ids.length });`;
 
   const result = await runJavaScript(buildJavaScript(body), 120_000, execFn);
 
-  const parsed = parseAppleScriptJson(
-    result.stdout,
-    findTracksScriptResultSchema,
-    "Music returned an invalid find tracks payload.",
-  );
-
+  const parsed = parseFindTracksPayload(result.stdout);
   const sortBy = validatedCriteria.sortBy ?? "name";
   const limit = validatedCriteria.limit ?? 50;
-  const sorted = parsed.tracks
-    .filter((track) => matchesTrackCriteria(track, validatedCriteria))
-    .sort(createTrackComparator(sortBy));
+  const matches = createTrackMatcher(validatedCriteria);
+  const matched: LibraryTrack[] = [];
+  for (let index = 0; index < parsed.scanned; index += 1) {
+    const track = trackAt(parsed.columns, index);
+    if (matches(track)) matched.push(track);
+  }
+  matched.sort(createTrackComparator(sortBy));
 
   return {
-    tracks: sorted.slice(0, limit),
-    totalMatched: sorted.length,
+    tracks: findTracksPageSchema.parse(matched.slice(0, limit)),
+    totalMatched: matched.length,
     limit,
     scanned: parsed.scanned,
     truncated: parsed.truncated,
+  };
+}
+
+const INVALID_FIND_TRACKS_PAYLOAD = "Music returned an invalid find tracks payload.";
+
+/**
+ * Validate the column payload in one pass over its primitives. Up to 50,000 candidates arrive
+ * per call, so rows are not built or zod-validated until after filtering and the limit cut.
+ */
+function parseFindTracksPayload(stdout: string): {
+  columns: TrackColumns;
+  scanned: number;
+  truncated: boolean;
+} {
+  const invalid = () =>
+    new MusicToolError("script_error", INVALID_FIND_TRACKS_PAYLOAD, {
+      outputLength: stdout.length,
+    });
+  let payload: unknown;
+  try {
+    payload = JSON.parse(stdout);
+  } catch {
+    throw invalid();
+  }
+  if (typeof payload !== "object" || payload === null) throw invalid();
+  const { columns, scanned, truncated } = payload as Record<string, unknown>;
+  if (typeof columns !== "object" || columns === null || typeof truncated !== "boolean") {
+    throw invalid();
+  }
+  if (!Number.isInteger(scanned) || (scanned as number) < 0) throw invalid();
+  for (const [name, elementType] of TRACK_COLUMNS) {
+    const column = (columns as Record<string, unknown>)[name];
+    if (!Array.isArray(column) || column.length !== scanned) throw invalid();
+    for (const value of column) {
+      if (typeof value !== elementType) throw invalid();
+    }
+  }
+  return { columns: columns as TrackColumns, scanned: scanned as number, truncated };
+}
+
+function trackAt(columns: TrackColumns, index: number): LibraryTrack {
+  return {
+    id: columns.ids[index] as string,
+    name: columns.names[index] as string,
+    artist: columns.artists[index] as string,
+    album: columns.albums[index] as string,
+    genre: columns.genres[index] as string,
+    duration: columns.durations[index] as number,
+    year: columns.years[index] as number,
+    playCount: columns.playCounts[index] as number,
   };
 }
 
@@ -787,17 +837,25 @@ export function pickFindTracksPrefilter(criteria: TrackCriteria): FindTracksPref
 }
 
 export function matchesTrackCriteria(track: LibraryTrack, criteria: TrackCriteria): boolean {
-  for (const [property, field] of TEXT_FILTERS) {
-    if (!containsText(track[property], criteria[field])) return false;
-  }
-  if (criteria.yearMin !== undefined && track.year < criteria.yearMin) return false;
-  if (criteria.yearMax !== undefined && track.year > criteria.yearMax) return false;
-  if (criteria.playCountMin !== undefined && track.playCount < criteria.playCountMin) return false;
-  if (criteria.playCountMax !== undefined && track.playCount > criteria.playCountMax) return false;
-  return true;
+  return createTrackMatcher(criteria)(track);
 }
 
-function containsText(value: string, needle: string | undefined): boolean {
-  if (!needle) return true;
-  return value.toLowerCase().includes(needle.toLowerCase());
+/** Build the predicate once per call so the text needles are lowercased once, not per row. */
+function createTrackMatcher(criteria: TrackCriteria): (track: LibraryTrack) => boolean {
+  const needles: [property: (typeof TEXT_FILTERS)[number][0], needle: string][] = [];
+  for (const [property, field] of TEXT_FILTERS) {
+    const needle = criteria[field];
+    if (needle) needles.push([property, needle.toLowerCase()]);
+  }
+  const { yearMin, yearMax, playCountMin, playCountMax } = criteria;
+  return (track) => {
+    for (const [property, needle] of needles) {
+      if (!track[property].toLowerCase().includes(needle)) return false;
+    }
+    if (yearMin !== undefined && track.year < yearMin) return false;
+    if (yearMax !== undefined && track.year > yearMax) return false;
+    if (playCountMin !== undefined && track.playCount < playCountMin) return false;
+    if (playCountMax !== undefined && track.playCount > playCountMax) return false;
+    return true;
+  };
 }

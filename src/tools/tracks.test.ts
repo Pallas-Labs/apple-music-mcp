@@ -413,14 +413,54 @@ describe("createTrackOperations.findTracks", () => {
   });
 
   test("rejects schema-invalid script payloads", async () => {
+    const validColumns = {
+      ids: ["TRACK00000000001"],
+      names: ["Love"],
+      artists: ["A"],
+      albums: ["B"],
+      genres: ["C"],
+      durations: [1.5],
+      years: [2001],
+      playCounts: [3],
+    };
+    const payloads: unknown[] = [
+      { tracks: "not-an-array", scanned: 1, truncated: false },
+      { columns: { ...validColumns, years: ["2001"] }, scanned: 1, truncated: false },
+      { columns: { ...validColumns, names: [] }, scanned: 1, truncated: false },
+      { columns: validColumns, scanned: 2, truncated: false },
+      { columns: validColumns, scanned: 1, truncated: "no" },
+      "not json",
+    ];
+    for (const payload of payloads) {
+      const operations = createTrackOperations(async () => ({
+        stdout: typeof payload === "string" ? payload : JSON.stringify(payload),
+        stderr: "",
+      }));
+      await expect(operations.findTracks({ yearMin: 2000 })).rejects.toMatchObject({
+        code: "script_error",
+      });
+    }
+
     const operations = createTrackOperations(async () => ({
-      stdout: JSON.stringify({ tracks: "not-an-array", scanned: 1, truncated: false }),
+      stdout: JSON.stringify({ columns: validColumns, scanned: 1, truncated: false }),
       stderr: "",
     }));
-
-    await expect(operations.findTracks({ yearMin: 2000 })).rejects.toMatchObject({
-      code: "script_error",
+    await expect(operations.findTracks({ yearMin: 2000 })).resolves.toMatchObject({
+      tracks: [{ id: "TRACK00000000001", name: "Love", year: 2001, playCount: 3 }],
+      totalMatched: 1,
     });
+  });
+
+  test("matches text filters without regard to case or Unicode line terminators", async () => {
+    const tracks = [
+      { ...sampleTrack, id: "TRACK00000000001", name: "ÉLAN VITAL", artist: "Mixed Case" },
+      { ...sampleTrack, id: "TRACK00000000002", name: "elan", artist: "mixed case" },
+    ];
+    const { exec } = fakeMusicExec(trackColumns(tracks));
+    const operations = createTrackOperations(exec);
+
+    const result = await operations.findTracks({ nameQuery: "élan", artist: "MIXED" });
+    expect(result.tracks.map((track) => track.id)).toEqual(["TRACK00000000001"]);
   });
 });
 
