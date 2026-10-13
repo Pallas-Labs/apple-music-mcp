@@ -21,8 +21,19 @@
   them in bulk. Searches that took 30 to 53 seconds on a 6,059-track library now take under
   3 seconds, and the 1,000-candidate window is gone. `truncated` is now true only above 50,000
   candidates.
+- `music.add_tracks_to_playlist` resolves all IDs with one library read: 10 IDs went from 7.0 s
+  to 0.7 s, and 100 or 200 IDs finish (16 s and 34 s) instead of timing out.
+- `music.remove_tracks_from_playlist` reads playlist IDs in bulk, so removing a few tracks from a
+  large playlist no longer reads every entry. Removing many instances is still bound by Music's
+  per-track delete.
+- `music.get_playlist_tracks` reads each page in bulk: a 100-track page went from 9.4 s to 0.4 s.
+- `music.create_playlist_from_criteria` searches without holding the write lock, so other writes
+  can proceed during the search.
+- Playback tools poll the player state instead of waiting a fixed delay.
+- Every script result is validated against the tool's output schema; malformed output returns
+  `script_error`.
+- `music.capabilities` and `music.health` report the configuration the server was created with.
 - Every tool input field, and output fields with non-obvious meaning, now has a description.
   Each tool description starts with a summary line of at most 120 characters.
 - Server instructions and `music://guide` describe result and error shapes.
-- `music.capabilities` reports tool names from the server's tool registry.
 - MCP TypeScript SDK updated to 2.3.1.
