@@ -3,7 +3,7 @@ import { acceptedContent, inputRequired, inputResponse } from "@modelcontextprot
 import { nameSchema, persistentIdSchema } from "../config.js";
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from "../applescript/runner.js";
+import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { Playlist } from "../types.js";
@@ -149,9 +149,9 @@ on error errMsg number errNum
 end try`);
 }
 
-export function createPlaylistEditOperations(run: typeof runAppleScript = runAppleScript) {
+export function createPlaylistEditOperations(execFn?: ExecFn) {
   async function runPlaylistScript(playlistId: string, script: string): Promise<PlaylistInfo> {
-    const result = await run(script, 40_000);
+    const result = await runAppleScript(script, 40_000, execFn);
     const parsed = parseAppleScriptJson(
       result.stdout,
       playlistScriptResultSchema,

@@ -2,7 +2,7 @@ import * as z from "zod/v4";
 import { persistentIdSchema } from "../config.js";
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from "../applescript/runner.js";
+import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import {
@@ -99,10 +99,10 @@ on error errMsg number errNum
 end try`);
 }
 
-export function createLibraryOperations(run: typeof runAppleScript = runAppleScript) {
+export function createLibraryOperations(execFn?: ExecFn) {
   return {
     async updateTrack(trackId: string, writes: TrackWrites) {
-      const result = await run(buildUpdateTrackScript(trackId, writes), 40_000);
+      const result = await runAppleScript(buildUpdateTrackScript(trackId, writes), 40_000, execFn);
       const parsed = parseAppleScriptJson(
         result.stdout,
         updateTrackScriptResultSchema,

@@ -2,7 +2,7 @@ import * as z from "zod/v4";
 import { persistentIdSchema } from "../config.js";
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from "../applescript/runner.js";
+import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript, buildRawScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { NowPlaying } from "../types.js";
@@ -279,10 +279,10 @@ on error errMsg number errNum
 end try`);
 }
 
-export function createPlaybackOperations(run: typeof runAppleScript = runAppleScript) {
+export function createPlaybackOperations(execFn?: ExecFn) {
   return {
     async play(target: PlayTarget, shuffle: boolean | undefined): Promise<PlayResult> {
-      const result = await run(buildPlayScript(target, shuffle), 40_000);
+      const result = await runAppleScript(buildPlayScript(target, shuffle), 40_000, execFn);
       const parsed = parseAppleScriptJson(
         result.stdout,
         playScriptResultSchema,
@@ -294,7 +294,7 @@ export function createPlaybackOperations(run: typeof runAppleScript = runAppleSc
       return { playerState: toPlayerState(parsed.playerState), track: parsed.track };
     },
     async setPlayer(settings: PlayerSettings): Promise<PlayerStatus> {
-      const result = await run(buildSetPlayerScript(settings), 20_000);
+      const result = await runAppleScript(buildSetPlayerScript(settings), 20_000, execFn);
       const parsed = parseAppleScriptJson(
         result.stdout,
         setPlayerScriptResultSchema,
