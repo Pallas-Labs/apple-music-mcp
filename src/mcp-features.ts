@@ -21,6 +21,7 @@ const SERVER_GUIDE = `# Apple Music MCP guide
 7. Each successful result is \`structuredContent\` that matches the tool's \`outputSchema\`.
 8. Errors set \`isError\`. Errors raised by this server return JSON text \`{"code": "...", "message": "..."}\`; SDK input validation errors are plain text.
 9. Clients that run tools from code should chain read calls in one script and pass persistent IDs between tools.
+10. \`music.delete_playlist\` asks the user to confirm when the client supports elicitation. Other clients must pass \`confirm: true\`, and only after the user approves.
 `;
 
 export function registerResources(server: McpServer): void {

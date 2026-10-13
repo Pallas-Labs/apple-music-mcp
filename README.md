@@ -22,9 +22,22 @@ MCP server for controlling Apple Music on macOS via AppleScript. Implements MCP 
 | `music.create_playlist_from_criteria` | Create a playlist from a bounded criteria match     | Write      |
 | `music.create_folder`                 | Create a folder playlist, optionally nested         | Write      |
 | `music.move_playlist`                 | Move a playlist into a folder                       | Write      |
+| `music.rename_playlist`               | Rename a user playlist or folder                    | Write      |
+| `music.delete_playlist`               | Delete a user playlist after the user confirms      | Write      |
 | `music.playback_control`              | Play, pause, next, previous, toggle                 | Write      |
+| `music.play`                          | Play a playlist or track, optionally shuffled       | Write      |
+| `music.set_player`                    | Set volume, shuffle, repeat, or position            | Write      |
 | `music.add_tracks_to_playlist`        | Add unique track IDs with per-ID outcomes           | Write      |
 | `music.remove_tracks_from_playlist`   | Remove every instance of each unique track ID       | Write      |
+| `music.update_track`                  | Set a track's favorite, dislike, or star rating     | Write      |
+
+### Playlist deletion
+
+`music.delete_playlist` deletes one user playlist; the tracks stay in the library. It refuses
+folders, because deleting a folder also deletes every playlist in it, and it refuses built-in
+and Apple Music playlists. If the client supports elicitation, the server always asks the user
+to confirm and names the playlist and its track count. Other clients must pass `confirm: true`,
+and should do so only after the user approves. A declined or cancelled prompt deletes nothing.
 
 ### Track matching and bulk mutation results
 
@@ -177,9 +190,14 @@ disabled_tools = [
   "music.create_playlist_from_criteria",
   "music.create_folder",
   "music.move_playlist",
+  "music.rename_playlist",
+  "music.delete_playlist",
   "music.playback_control",
+  "music.play",
+  "music.set_player",
   "music.add_tracks_to_playlist",
-  "music.remove_tracks_from_playlist"
+  "music.remove_tracks_from_playlist",
+  "music.update_track"
 ]
 ```
 
