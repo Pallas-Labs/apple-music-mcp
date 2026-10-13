@@ -1,10 +1,10 @@
 import * as z from "zod/v4";
 import { persistentIdSchema } from "../config.js";
-import { runAppleScript, runJavaScript } from "../applescript/runner.js";
+import { runJavaScript } from "../applescript/runner.js";
 import type { ExecFn } from "../applescript/runner.js";
-import { escapeAppleScriptString, toJavaScriptLiteral } from "../applescript/escape.js";
+import { toJavaScriptLiteral } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { buildJavaScript, buildScript } from "../applescript/templates.js";
+import { buildJavaScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { LibraryTrack, Track, TrackCriteria, TrackSortBy } from "../types.js";
 import {
@@ -310,7 +310,11 @@ export const getPlaylistTracksTool = defineTool({
   annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
   async handler({ playlistId, offset, limit }) {
-    const result = await getPlaylistTracks(playlistId, offset ?? 0, limit ?? 50);
+    const result = await defaultTrackOperations.getPlaylistTracks(
+      playlistId,
+      offset ?? 0,
+      limit ?? 50,
+    );
     return {
       structuredContent: result,
       logData: { playlistId, trackCount: result.tracks.length, total: result.total },
@@ -454,69 +458,61 @@ JSON.stringify({ tracks, scanned: tracks.length, truncated: candidateCount > tra
   };
 }
 
-async function getPlaylistTracks(
+async function getPlaylistTracksWithRunner(
+  execFn: ExecFn | undefined,
   playlistId: string,
   offset: number,
   limit: number,
 ): Promise<{ tracks: Track[]; total: number; offset: number; limit: number }> {
-  const safeId = escapeAppleScriptString(playlistId);
+  // JXA's slice(start, end) on a Music collection includes both ends, returns nothing when
+  // start equals end, and throws when end passes the last entry. So the page is clamped first
+  // and a one-entry page reads that entry by index.
   const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 60 seconds
-            set targetPlaylist to first user playlist whose persistent ID is "${safeId}"
-            set allTracks to tracks of targetPlaylist
-            set totalCount to count of allTracks
-            set trackRows to {}
-            set startIdx to ${offset + 1}
-            set endIdx to ${offset} + ${limit}
-            if endIdx > totalCount then set endIdx to totalCount
-            if startIdx > totalCount then
-                return "{\\"tracks\\":[],\\"total\\":" & totalCount & ",\\"offset\\":${offset},\\"limit\\":${limit}}"
-            end if
-            repeat with i from startIdx to endIdx
-                set t to item i of allTracks
-                try
-                    set trackId to persistent ID of t as text
-                    set trackName to name of t as text
-                    set trackArtist to artist of t as text
-                    set trackAlbum to album of t as text
-                    set trackDuration to duration of t
-                    set end of trackRows to {trackId, trackName, trackArtist, trackAlbum, trackDuration}
-                end try
-            end repeat
-            return "{\\"tracks\\":" & my jsonTracks(trackRows) & ",\\"total\\":" & totalCount & ",\\"offset\\":${offset},\\"limit\\":${limit}}"
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try
+const playlistId = ${toJavaScriptLiteral(playlistId)};
+const offset = ${offset};
+const limit = ${limit};
+${PIN_USER_PLAYLIST}
+const total = playlist.tracks.length;
+const end = Math.min(offset + limit, total) - 1;
+let ids = [];
+let names = [];
+let artists = [];
+let albums = [];
+let durations = [];
+if (offset === end) {
+    const entry = playlist.tracks[offset];
+    ids = [entry.persistentID()];
+    names = [entry.name()];
+    artists = [entry.artist()];
+    albums = [entry.album()];
+    durations = [entry.duration()];
+} else if (offset < end) {
+    const page = playlist.tracks.slice(offset, end);
+    ids = page.persistentID();
+    names = page.name();
+    artists = page.artist();
+    albums = page.album();
+    durations = page.duration();
+}
+if ([names, artists, albums, durations].some((column) => column.length !== ids.length)) {
+    throw new Error("Music playlist changed while reading tracks.");
+}
+const tracks = ids.map((id, index) => ({
+    id,
+    name: names[index],
+    artist: artists[index],
+    album: albums[index],
+    duration: durations[index],
+}));
+JSON.stringify({ tracks, total, offset, limit });`;
 
-on jsonTracks(rows)
-    set json to "["
-    repeat with i from 1 to (count of rows)
-        set row to item i of rows
-        set tId to item 1 of row
-        set tName to item 2 of row
-        set tArtist to item 3 of row
-        set tAlbum to item 4 of row
-        set tDuration to item 5 of row
-        set json to json & "{\\"id\\":\\"" & my jsonEscape(tId as text) & "\\",\\"name\\":\\"" & my jsonEscape(tName as text) & "\\",\\"artist\\":\\"" & my jsonEscape(tArtist as text) & "\\",\\"album\\":\\"" & my jsonEscape(tAlbum as text) & "\\",\\"duration\\":" & tDuration & "}"
-        if i < (count of rows) then
-            set json to json & ","
-        end if
-    end repeat
-    return json & "]"
-end jsonTracks`;
+  const result = await runJavaScript(buildJavaScript(body), 60_000, execFn);
 
-  const result = await runAppleScript(buildScript(body), 60_000);
-
-  const parsed = parseAppleScriptJson(
+  return parseAppleScriptJson(
     result.stdout,
     playlistTracksResultSchema,
     "Music returned an invalid playlist tracks payload.",
   );
-  return parsed;
 }
 
 async function addTracksToPlaylistWithRunner(
@@ -697,6 +693,8 @@ function assertUniqueTrackIds(trackIds: string[]): void {
 export function createTrackOperations(execFn?: ExecFn) {
   return {
     findTracks: (criteria: TrackCriteria) => findTracksWithRunner(execFn, criteria),
+    getPlaylistTracks: (playlistId: string, offset: number, limit: number) =>
+      getPlaylistTracksWithRunner(execFn, playlistId, offset, limit),
     addTracksToPlaylist: (playlistId: string, trackIds: string[]) =>
       addTracksToPlaylistWithRunner(execFn, playlistId, trackIds),
     removeTracksFromPlaylist: (playlistId: string, trackIds: string[]) =>

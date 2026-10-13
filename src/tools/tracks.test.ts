@@ -97,31 +97,42 @@ function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: L
   const failDeleteAt = new Set(options.failDeleteAt ?? []);
   const libraryDatabaseId = (track: LibraryTrack) => options.library.indexOf(track) + 1;
 
-  type Spec = { kind: "library" | "playlist"; index: number };
-  function collection(kind: Spec["kind"], tracks: () => LibraryTrack[]) {
-    const column = (read: (track: LibraryTrack, index: number) => unknown) => () => {
-      if (tracks().length === 0) throw new Error(MUSIC_NOT_FOUND);
-      return tracks().map(read);
-    };
+  type Kind = "library" | "playlist";
+  type Spec = { kind: Kind; index: number };
+  const columns: Record<string, (track: LibraryTrack, index: number, kind: Kind) => unknown> = {
+    persistentID: (track) => track.id,
+    id: (track, index, kind) => (kind === "library" ? libraryDatabaseId(track) : entryIds[index]),
+    name: (track) => track.name,
+    artist: (track) => track.artist,
+    album: (track) => track.album,
+    genre: (track) => track.genre,
+    duration: (track) => track.duration,
+    year: (track) => track.year,
+    playedCount: (track) => track.playCount,
+  };
+
+  /** One element specifier: a handle for duplicate/delete that also reads its own properties. */
+  function element(kind: Kind, tracks: () => LibraryTrack[], index: number) {
+    const spec: Record<string, unknown> & Spec = { kind, index };
+    for (const [name, read] of Object.entries(columns)) {
+      spec[name] = () => {
+        const track = tracks()[index];
+        if (!track) throw new Error(MUSIC_NOT_FOUND);
+        return read(track, index, kind);
+      };
+    }
+    return spec;
+  }
+
+  function collection(kind: Kind, tracks: () => LibraryTrack[]) {
     const target: Record<string | symbol, unknown> = {
-      persistentID: column((track) => track.id),
-      id: column((track, index) =>
-        kind === "library" ? libraryDatabaseId(track) : entryIds[index],
-      ),
-      name: column((track) => track.name),
-      artist: column((track) => track.artist),
-      album: column((track) => track.album),
-      genre: column((track) => track.genre),
-      duration: column((track) => track.duration),
-      year: column((track) => track.year),
-      playedCount: column((track) => track.playCount),
-      byId: (databaseId: number): Spec => {
+      byId: (databaseId: number) => {
         const index =
           kind === "library"
             ? options.library.findIndex((track) => libraryDatabaseId(track) === databaseId)
             : entryIds.indexOf(databaseId);
         if (index < 0 || index >= tracks().length) throw new Error(MUSIC_NOT_FOUND);
-        return { kind, index };
+        return element(kind, tracks, index);
       },
       slice: (start: number, end: number) => {
         if (start < 0 || end >= tracks().length) throw new Error("Message not understood.");
@@ -129,12 +140,17 @@ function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: L
         return collection(kind, () => (range.length === 1 ? [] : range));
       },
     };
+    for (const [name, read] of Object.entries(columns)) {
+      target[name] = () => {
+        if (tracks().length === 0) throw new Error(MUSIC_NOT_FOUND);
+        return tracks().map((track, index) => read(track, index, kind));
+      };
+    }
     return new Proxy(target, {
       get(object, property) {
         if (property === "length") return tracks().length;
         if (typeof property === "string" && /^\d+$/.test(property)) {
-          const spec: Spec = { kind, index: Number(property) };
-          return spec;
+          return element(kind, tracks, Number(property));
         }
         return object[property];
       },
@@ -403,6 +419,87 @@ describe("createTrackOperations.findTracks", () => {
     }));
 
     await expect(operations.findTracks({ yearMin: 2000 })).rejects.toMatchObject({
+      code: "script_error",
+    });
+  });
+});
+
+describe("createTrackOperations.getPlaylistTracks", () => {
+  const library = libraryOf(5);
+  const page = (track: LibraryTrack) => ({
+    id: track.id,
+    name: track.name,
+    artist: track.artist,
+    album: track.album,
+    duration: track.duration,
+  });
+
+  test("returns the requested page with the playlist total", async () => {
+    const { exec } = fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: library } });
+    const operations = createTrackOperations(exec);
+
+    await expect(operations.getPlaylistTracks("playlist12345678", 1, 2)).resolves.toEqual({
+      tracks: [page(library[1]!), page(library[2]!)],
+      total: 5,
+      offset: 1,
+      limit: 2,
+    });
+  });
+
+  test("returns a final page holding a single track", async () => {
+    const { exec } = fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: library } });
+    const operations = createTrackOperations(exec);
+
+    await expect(operations.getPlaylistTracks("PLAYLIST12345678", 4, 10)).resolves.toEqual({
+      tracks: [page(library[4]!)],
+      total: 5,
+      offset: 4,
+      limit: 10,
+    });
+  });
+
+  test("returns an empty page past the end and for an empty playlist", async () => {
+    const full = createTrackOperations(
+      fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: library } }).exec,
+    );
+    await expect(full.getPlaylistTracks("PLAYLIST12345678", 5, 50)).resolves.toEqual({
+      tracks: [],
+      total: 5,
+      offset: 5,
+      limit: 50,
+    });
+
+    const empty = createTrackOperations(
+      fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: [] } }).exec,
+    );
+    await expect(empty.getPlaylistTracks("PLAYLIST12345678", 0, 50)).resolves.toEqual({
+      tracks: [],
+      total: 0,
+      offset: 0,
+      limit: 50,
+    });
+  });
+
+  test("fails with not_found for unknown and hostile playlist IDs", async () => {
+    const { exec } = fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: library } });
+    const operations = createTrackOperations(exec);
+    const hostile = `A"); throw new Error("pwned"); (\`${String.fromCharCode(0x2028)}`;
+
+    await expect(operations.getPlaylistTracks("PLAYLIST00000000", 0, 50)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(operations.getPlaylistTracks(hostile, 0, 50)).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
+  test("rejects schema-invalid script payloads", async () => {
+    const operations = createTrackOperations(async () => ({
+      stdout: JSON.stringify({ tracks: [{ id: "X" }], total: 1, offset: 0, limit: 50 }),
+      stderr: "",
+    }));
+
+    await expect(operations.getPlaylistTracks("PLAYLIST12345678", 0, 50)).rejects.toMatchObject({
       code: "script_error",
     });
   });
