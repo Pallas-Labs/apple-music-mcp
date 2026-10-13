@@ -34,9 +34,7 @@ export type ToolResult<Output extends ToolSchema> = {
   logData?: Record<string, unknown>;
 };
 
-/** What a handler can learn about the client and the current round of a multi-round call. */
 export type ToolContext = {
-  /** True when the client accepts form-mode elicitation requests. */
   canElicit: boolean;
   /** Client responses to the input requests that an earlier round of this call returned. */
   inputResponses: Record<string, unknown> | undefined;

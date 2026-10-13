@@ -42,7 +42,6 @@ export {
   updateTrackTool,
 };
 
-/** Every tool, in the order the server registers and lists them. */
 export const allTools: readonly AnyToolDef[] = [
   capabilitiesTool,
   healthTool,

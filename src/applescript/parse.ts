@@ -1,7 +1,6 @@
 import type * as z from "zod/v4";
 import { MusicToolError } from "../types.js";
 
-/** Parse a script's JSON stdout against `schema`, mapping any failure to script_error. */
 export function parseAppleScriptJson<Schema extends z.ZodType>(
   stdout: string,
   schema: Schema,
