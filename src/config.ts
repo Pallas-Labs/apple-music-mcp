@@ -46,3 +46,5 @@ export const runtimeConfig = Object.freeze({
   writesEnabled: readBooleanEnv("APPLE_MUSIC_MCP_ENABLE_WRITES"),
   dryRun: readBooleanEnv("APPLE_MUSIC_MCP_DRY_RUN"),
 });
+
+export type RuntimeConfig = typeof runtimeConfig;

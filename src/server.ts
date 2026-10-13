@@ -1,9 +1,13 @@
-import { McpServer } from "@modelcontextprotocol/server";
-import type { ToolCallback } from "@modelcontextprotocol/server";
-import type { AnyToolDef, ToolSchema } from "./tool-contracts.js";
+import {
+  CLIENT_CAPABILITIES_META_KEY,
+  isInputRequiredResult,
+  McpServer,
+} from "@modelcontextprotocol/server";
+import type { ClientCapabilities, ServerContext, ToolCallback } from "@modelcontextprotocol/server";
+import type { AnyToolDef, ToolContext, ToolSchema } from "./tool-contracts.js";
 export { defineTool } from "./tool-contracts.js";
-export type { ToolDef, ToolResult } from "./tool-contracts.js";
-import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from "./config.js";
+export type { ToolContext, ToolDef, ToolResult } from "./tool-contracts.js";
+import { SERVER_NAME, SERVER_VERSION, runtimeConfig, type RuntimeConfig } from "./config.js";
 import { MusicToolError } from "./types.js";
 import { log } from "./logger.js";
 import { registerPrompts, registerResources, STATIC_CATALOGUE_CACHE_HINT } from "./mcp-features.js";
@@ -49,7 +53,15 @@ export function toolErrorResult(error: unknown): {
   };
 }
 
-export function createServer(): McpServer {
+export type CreateServerOptions = {
+  config?: RuntimeConfig;
+  tools?: readonly AnyToolDef[];
+};
+
+export function createServer({
+  config = runtimeConfig,
+  tools = allTools,
+}: CreateServerOptions = {}): McpServer {
   const server = new McpServer(
     {
       name: SERVER_NAME,
@@ -78,14 +90,34 @@ export function createServer(): McpServer {
     },
   );
 
-  for (const tool of allTools) registerTool(server, tool);
+  for (const tool of tools) registerTool(server, tool, config);
   registerResources(server);
   registerPrompts(server);
 
   return server;
 }
 
-function registerTool(server: McpServer, tool: AnyToolDef): void {
+function clientCapabilities(server: McpServer, ctx: ServerContext): ClientCapabilities | undefined {
+  // 2026-07-28 requests carry capabilities in their envelope; 2025-era clients declared them at
+  // initialize, which only the server instance remembers.
+  const envelope = ctx.mcpReq.envelope as
+    | Partial<Record<typeof CLIENT_CAPABILITIES_META_KEY, ClientCapabilities>>
+    | undefined;
+  return envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities();
+}
+
+function toolContext(server: McpServer, ctx: ServerContext): ToolContext {
+  const elicitation = clientCapabilities(server, ctx)?.elicitation;
+  return {
+    // An elicitation capability with neither mode listed means form mode.
+    canElicit:
+      elicitation !== undefined &&
+      (elicitation.form !== undefined || elicitation.url === undefined),
+    inputResponses: ctx.mcpReq.inputResponses,
+  };
+}
+
+function registerTool(server: McpServer, tool: AnyToolDef, config: RuntimeConfig): void {
   server.registerTool<ToolSchema, ToolSchema>(
     tool.name,
     {
@@ -95,11 +127,11 @@ function registerTool(server: McpServer, tool: AnyToolDef): void {
       outputSchema: tool.outputSchema,
       annotations: tool.annotations,
     },
-    (async (input: never) => {
+    (async (input: never, ctx: ServerContext) => {
       const startedAt = Date.now();
       try {
         // Write gate
-        if (tool.writesRequired && !runtimeConfig.writesEnabled) {
+        if (tool.writesRequired && !config.writesEnabled) {
           return toolErrorResult(
             new MusicToolError(
               "validation_error",
@@ -109,7 +141,7 @@ function registerTool(server: McpServer, tool: AnyToolDef): void {
         }
 
         // Dry run
-        if (tool.writesRequired && runtimeConfig.dryRun) {
+        if (tool.writesRequired && config.dryRun) {
           const structuredContent = tool.dryRunResult(input);
           if (!isRecord(structuredContent)) {
             throw new MusicToolError("script_error", "Tool returned a non-object dry-run result.");
@@ -130,9 +162,19 @@ function registerTool(server: McpServer, tool: AnyToolDef): void {
           };
         }
 
-        // Execute (with mutation lock for writes)
-        const execute = () => tool.handler(input);
+        // Execute (with mutation lock for writes). Each round of a multi-round call takes the lock
+        // separately, so no lock is held while the client waits on the user.
+        const context = toolContext(server, ctx);
+        const execute = () => tool.handler(input, context);
         const result = tool.writesRequired ? await withMutationLock(execute) : await execute();
+        if (isInputRequiredResult(result)) {
+          log("tool_input_required", {
+            tool: tool.name,
+            durationMs: Date.now() - startedAt,
+            inputRequests: Object.keys(result.inputRequests ?? {}),
+          });
+          return result;
+        }
         const structuredContent = result.structuredContent;
         if (!isRecord(structuredContent)) {
           throw new MusicToolError("script_error", "Tool returned a non-object structured result.");

@@ -5,7 +5,7 @@ import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { log } from "./logger.js";
 import { createServer } from "./server.js";
 
-const handle = serveStdio(createServer);
+const handle = serveStdio(() => createServer());
 log("server_started", { name: SERVER_NAME, version: SERVER_VERSION });
 
 let shuttingDown = false;

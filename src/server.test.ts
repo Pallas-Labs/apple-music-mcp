@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import * as z from "zod/v4";
 import {
   Client,
   InMemoryTransport,
   StreamableHTTPClientTransport,
+  type ClientOptions,
+  type ElicitRequestFormParams,
+  type ElicitResult,
 } from "@modelcontextprotocol/client";
-import { createMcpHandler } from "@modelcontextprotocol/server";
+import { createMcpHandler, inputRequired, inputResponse } from "@modelcontextprotocol/server";
 import { runtimeConfig } from "./config.js";
-import { createServer, toolErrorResult } from "./server.js";
+import { createServer, defineTool, toolErrorResult, type CreateServerOptions } from "./server.js";
 import { MusicToolError } from "./types.js";
 import {
   addTracksToPlaylistTool,
@@ -61,9 +65,35 @@ const EXPECTED_ANNOTATIONS = {
   "music.remove_tracks_from_playlist": REMOVE_ANNOTATIONS,
 } as const;
 
-async function withMcpClient<T>(run: (client: Client) => Promise<T>): Promise<T> {
-  const server = createServer();
-  const client = new Client({ name: "apple-music-mcp-test", version: "1.0.0" });
+type TestClientOptions = {
+  server?: CreateServerOptions;
+  /** Declares the elicitation capability and answers every elicitation request. */
+  elicit?: (params: ElicitRequestFormParams) => ElicitResult;
+};
+
+function createTestClient(
+  name: string,
+  clientOptions: ClientOptions,
+  elicit?: TestClientOptions["elicit"],
+) {
+  const client = new Client(
+    { name, version: "1.0.0" },
+    elicit ? { ...clientOptions, capabilities: { elicitation: {} } } : clientOptions,
+  );
+  if (elicit) {
+    client.setRequestHandler("elicitation/create", (request) =>
+      elicit(request.params as ElicitRequestFormParams),
+    );
+  }
+  return client;
+}
+
+async function withMcpClient<T>(
+  run: (client: Client) => Promise<T>,
+  options: TestClientOptions = {},
+): Promise<T> {
+  const server = createServer(options.server);
+  const client = createTestClient("apple-music-mcp-test", {}, options.elicit);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -75,14 +105,18 @@ async function withMcpClient<T>(run: (client: Client) => Promise<T>): Promise<T>
   }
 }
 
-async function withModernMcpClient<T>(run: (client: Client) => Promise<T>): Promise<T> {
-  const handler = createMcpHandler(createServer);
+async function withModernMcpClient<T>(
+  run: (client: Client) => Promise<T>,
+  options: TestClientOptions = {},
+): Promise<T> {
+  const handler = createMcpHandler(() => createServer(options.server));
   const transport = new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
     fetch: (url, init) => handler.fetch(new Request(url, init)),
   });
-  const client = new Client(
-    { name: "apple-music-mcp-modern-test", version: "1.0.0" },
+  const client = createTestClient(
+    "apple-music-mcp-modern-test",
     { versionNegotiation: { mode: "auto" } },
+    options.elicit,
   );
   await client.connect(transport);
   try {
@@ -92,6 +126,35 @@ async function withModernMcpClient<T>(run: (client: Client) => Promise<T>): Prom
     await handler.close();
   }
 }
+
+const WRITES_ENABLED = Object.freeze({ writesEnabled: true, dryRun: false });
+
+const askTool = defineTool({
+  name: "test.ask",
+  description: "Ask the client one question when it can elicit.",
+  inputSchema: z.object({}),
+  outputSchema: z.object({ canElicit: z.boolean(), answer: z.string() }),
+  annotations: ADDITIVE_ANNOTATIONS,
+  writesRequired: true,
+  dryRunResult: () => ({ canElicit: false, answer: "dry run" }),
+  async handler(_input, { canElicit, inputResponses }) {
+    if (!canElicit) return { structuredContent: { canElicit, answer: "not asked" } };
+    const response = inputResponse(inputResponses, "go");
+    if (response.kind === "missing") {
+      return inputRequired({
+        inputRequests: {
+          go: inputRequired.elicit({
+            message: "Go?",
+            requestedSchema: z.object({ go: z.boolean() }),
+          }),
+        },
+      });
+    }
+    return {
+      structuredContent: { canElicit, answer: response.kind === "elicit" ? response.action : "" },
+    };
+  },
+});
 
 describe("createServer", () => {
   test("registers all tools with schemas and exact annotations", async () => {
@@ -224,6 +287,31 @@ describe("createServer", () => {
           },
         ]);
       });
+    }
+  });
+
+  test("passes input-required rounds through to clients of both eras", async () => {
+    for (const withClient of [withMcpClient, withModernMcpClient]) {
+      const messages: string[] = [];
+      const answered = await withClient(
+        (client) => client.callTool({ name: "test.ask", arguments: {} }),
+        {
+          server: { config: WRITES_ENABLED, tools: [askTool] },
+          elicit: (params) => {
+            messages.push(params.message);
+            return { action: "decline" };
+          },
+        },
+      );
+      expect(answered.isError).toBeFalsy();
+      expect(answered.structuredContent).toEqual({ canElicit: true, answer: "decline" });
+      expect(messages).toEqual(["Go?"]);
+
+      const unasked = await withClient(
+        (client) => client.callTool({ name: "test.ask", arguments: {} }),
+        { server: { config: WRITES_ENABLED, tools: [askTool] } },
+      );
+      expect(unasked.structuredContent).toEqual({ canElicit: false, answer: "not asked" });
     }
   });
 

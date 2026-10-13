@@ -1,4 +1,8 @@
-import type { StandardSchemaWithJSON, ToolAnnotations } from "@modelcontextprotocol/server";
+import type {
+  InputRequiredResult,
+  StandardSchemaWithJSON,
+  ToolAnnotations,
+} from "@modelcontextprotocol/server";
 
 export const READ_ONLY_ANNOTATIONS = Object.freeze({
   readOnlyHint: true,
@@ -23,13 +27,21 @@ export type ToolResult<Output extends ToolSchema> = {
   logData?: Record<string, unknown>;
 };
 
+/** What a handler can learn about the client and the current round of a multi-round call. */
+export type ToolContext = {
+  /** True when the client accepts form-mode elicitation requests. */
+  canElicit: boolean;
+  /** Client responses to the input requests that an earlier round of this call returned. */
+  inputResponses: Record<string, unknown> | undefined;
+};
+
 type BaseToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = {
   name: string;
   description: string;
   inputSchema: Input;
   outputSchema: Output;
   annotations: ToolAnnotations;
-  handler: (input: Args) => Promise<ToolResult<Output>>;
+  handler: (input: Args, context: ToolContext) => Promise<ToolResult<Output> | InputRequiredResult>;
 };
 
 type ReadToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = BaseToolDef<
