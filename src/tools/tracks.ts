@@ -40,6 +40,14 @@ const TEXT_FILTERS = [
 
 const textCollator = new Intl.Collator("en", { sensitivity: "base" });
 
+/**
+ * JXA that binds `playlist` from a `playlistId` constant. Music re-evaluates a whose-based
+ * specifier on every command that names it (350 ms per duplicate against 500 playlists), so
+ * commands address the playlist by database ID instead. Reading `.id()` on an empty whose
+ * result throws -1728, which the runner maps to not_found.
+ */
+const PIN_USER_PLAYLIST = `const playlist = music.userPlaylists.byId(music.userPlaylists.whose({persistentID: playlistId})[0].id());`;
+
 function canonicalTrackId(trackId: string): string {
   return trackId.toUpperCase();
 }
@@ -517,41 +525,46 @@ async function addTracksToPlaylistWithRunner(
   trackIds: string[],
 ): Promise<AddTracksResult> {
   assertUniqueTrackIds(trackIds);
-  const safePlaylistId = escapeAppleScriptString(playlistId);
-  const idList = trackIds.map((id) => `"${escapeAppleScriptString(id)}"`).join(", ");
+  // One bulk read of the library's IDs replaces a library-wide whose lookup per requested ID.
+  // Music rejects duplicating a list of tracks (-10006), so tracks are still duplicated one at a time.
   const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 60 seconds
-            set targetPlaylist to first user playlist whose persistent ID is "${safePlaylistId}"
-            set trackIdList to {${idList}}
-            set addedTrackIds to {}
-            set missingTrackIds to {}
-            set failedTrackIds to {}
-            repeat with tid in trackIdList
-                set targetTrack to missing value
-                try
-                    set targetTrack to first track of library playlist 1 whose persistent ID is tid
-                on error
-                    set end of missingTrackIds to (tid as text)
-                end try
-                if targetTrack is not missing value then
-                    try
-                        duplicate targetTrack to targetPlaylist
-                        set end of addedTrackIds to (tid as text)
-                    on error
-                        set end of failedTrackIds to (tid as text)
-                    end try
-                end if
-            end repeat
-            return "{\\"playlistId\\":\\"${safePlaylistId}\\",\\"requested\\":" & (count of trackIdList) & ",\\"added\\":" & (count of addedTrackIds) & ",\\"addedTrackIds\\":" & my jsonStringArray(addedTrackIds) & ",\\"missingTrackIds\\":" & my jsonStringArray(missingTrackIds) & ",\\"failedTrackIds\\":" & my jsonStringArray(failedTrackIds) & "}"
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try`;
+const requestedIds = ${toJavaScriptLiteral(trackIds)};
+const playlistId = ${toJavaScriptLiteral(playlistId)};
+${PIN_USER_PLAYLIST}
+const library = music.libraryPlaylists[0];
+const libraryIds = library.tracks.length > 0 ? library.tracks.persistentID() : [];
+const databaseIds = library.tracks.length > 0 ? library.tracks.id() : [];
+if (libraryIds.length !== databaseIds.length) {
+    throw new Error("Music library changed while reading tracks.");
+}
+const databaseIdByTrackId = new Map();
+libraryIds.forEach((id, index) => databaseIdByTrackId.set(id.toUpperCase(), databaseIds[index]));
+const addedTrackIds = [];
+const missingTrackIds = [];
+const failedTrackIds = [];
+for (const trackId of requestedIds) {
+    const databaseId = databaseIdByTrackId.get(trackId.toUpperCase());
+    if (databaseId === undefined) {
+        missingTrackIds.push(trackId);
+        continue;
+    }
+    try {
+        music.duplicate(library.tracks.byId(databaseId), {to: playlist});
+        addedTrackIds.push(trackId);
+    } catch (error) {
+        failedTrackIds.push(trackId);
+    }
+}
+JSON.stringify({
+    playlistId,
+    requested: requestedIds.length,
+    added: addedTrackIds.length,
+    addedTrackIds,
+    missingTrackIds,
+    failedTrackIds,
+});`;
 
-  const result = await runAppleScript(buildScript(body), 60_000, execFn);
+  const result = await runJavaScript(buildJavaScript(body), 60_000, execFn);
 
   const parsed = parseAppleScriptJson(
     result.stdout,

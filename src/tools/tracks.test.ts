@@ -71,6 +71,144 @@ function fakeMusicExec(columns: Record<string, unknown[]>): { exec: ExecFn; call
   return { exec, calls };
 }
 
+type FakeMusicOptions = {
+  library: LibraryTrack[];
+  playlist?: { id: string; tracks: LibraryTrack[] };
+  /** Track IDs whose duplicate into the playlist fails. */
+  failDuplicate?: string[];
+  /** Zero-based playlist positions whose delete fails. */
+  failDeleteAt?: number[];
+};
+
+const MUSIC_NOT_FOUND = "Can't get object. (-1728)";
+
+/**
+ * An exec that runs generated JXA against an in-memory Music. It models what the scripts rely
+ * on: bulk column reads, byId specifiers, inclusive `slice` ranges that throw past the end, and
+ * -1728 on property reads of an empty whose result. Returns the playlist's live entries so tests
+ * can assert on the end state.
+ */
+function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: LibraryTrack[] } {
+  const playlistTracks = [...(options.playlist?.tracks ?? [])];
+  const failDuplicate = new Set(options.failDuplicate ?? []);
+  const failDeleteAt = new Set(options.failDeleteAt ?? []);
+  const libraryDatabaseId = (track: LibraryTrack) => options.library.indexOf(track) + 1;
+
+  type Spec = { kind: "library" | "playlist"; index: number };
+  function collection(kind: Spec["kind"], tracks: () => LibraryTrack[]) {
+    const column = (read: (track: LibraryTrack) => unknown) => () => {
+      if (tracks().length === 0) throw new Error(MUSIC_NOT_FOUND);
+      return tracks().map(read);
+    };
+    const target: Record<string | symbol, unknown> = {
+      persistentID: column((track) => track.id),
+      id: column((track) =>
+        kind === "library" ? libraryDatabaseId(track) : 1000 + playlistTracks.indexOf(track),
+      ),
+      name: column((track) => track.name),
+      artist: column((track) => track.artist),
+      album: column((track) => track.album),
+      genre: column((track) => track.genre),
+      duration: column((track) => track.duration),
+      year: column((track) => track.year),
+      playedCount: column((track) => track.playCount),
+      byId: (databaseId: number): Spec => {
+        const index =
+          kind === "library"
+            ? options.library.findIndex((track) => libraryDatabaseId(track) === databaseId)
+            : databaseId - 1000;
+        if (index < 0 || index >= tracks().length) throw new Error(MUSIC_NOT_FOUND);
+        return { kind, index };
+      },
+      slice: (start: number, end: number) => {
+        if (start < 0 || end >= tracks().length) throw new Error("Message not understood.");
+        const range = tracks().slice(start, end + 1);
+        return collection(kind, () => (range.length === 1 ? [] : range));
+      },
+    };
+    return new Proxy(target, {
+      get(object, property) {
+        if (property === "length") return tracks().length;
+        if (typeof property === "string" && /^\d+$/.test(property)) {
+          const spec: Spec = { kind, index: Number(property) };
+          return spec;
+        }
+        return object[property];
+      },
+    });
+  }
+
+  const libraryTracks = collection("library", () => options.library);
+  const playlistCollection = collection("playlist", () => playlistTracks);
+  const playlistObject = { id: () => 7, tracks: playlistCollection };
+  const music = {
+    running: () => true,
+    launch: () => undefined,
+    libraryPlaylists: [{ tracks: libraryTracks }],
+    userPlaylists: {
+      whose: (argument: { persistentID: string }) =>
+        options.playlist &&
+        options.playlist.id.toUpperCase() === argument.persistentID.toUpperCase()
+          ? [playlistObject]
+          : [
+              {
+                id: () => {
+                  throw new Error(MUSIC_NOT_FOUND);
+                },
+              },
+            ],
+      byId: (databaseId: number) => {
+        if (databaseId !== 7) throw new Error(MUSIC_NOT_FOUND);
+        return playlistObject;
+      },
+    },
+    duplicate: (spec: Spec, { to }: { to: unknown }) => {
+      const track = options.library[spec.index];
+      if (
+        spec.kind !== "library" ||
+        !track ||
+        to !== playlistObject ||
+        failDuplicate.has(track.id)
+      ) {
+        throw new Error("Music got an error: Can't make or move that element into that container.");
+      }
+      playlistTracks.push(track);
+    },
+    delete: (spec: Spec) => {
+      if (spec.kind !== "playlist" || spec.index >= playlistTracks.length) {
+        throw new Error(MUSIC_NOT_FOUND);
+      }
+      if (failDeleteAt.has(spec.index)) throw new Error("Music got an error: Can't delete.");
+      playlistTracks.splice(spec.index, 1);
+    },
+  };
+
+  const exec: ExecFn = async (script, _timeoutMs, language) => {
+    expect(language).toBe("JavaScript");
+    try {
+      const stdout = vm.runInNewContext(script, {
+        Application: () => music,
+        delay: () => undefined,
+      });
+      return { stdout: String(stdout), stderr: "" };
+    } catch (error) {
+      // osascript reports script errors on stderr with the Apple error number in parentheses.
+      throw Object.assign(new Error("osascript failed"), {
+        stderr: `execution error: Error: ${(error as Error).message}`,
+      });
+    }
+  };
+  return { exec, playlistTracks };
+}
+
+function libraryOf(count: number): LibraryTrack[] {
+  return Array.from({ length: count }, (_, index) => ({
+    ...sampleTrack,
+    id: `TRACK${index.toString().padStart(11, "0")}`,
+    name: `Track ${index}`,
+  }));
+}
+
 describe("pickFindTracksPrefilter", () => {
   test("prefers the longest text criterion", () => {
     expect(
@@ -260,6 +398,90 @@ describe("createTrackOperations.findTracks", () => {
 
     await expect(operations.findTracks({ yearMin: 2000 })).rejects.toMatchObject({
       code: "script_error",
+    });
+  });
+});
+
+describe("createTrackOperations.addTracksToPlaylist", () => {
+  const library = libraryOf(5);
+  const [track0, track1, track2, track3] = library as [
+    LibraryTrack,
+    LibraryTrack,
+    LibraryTrack,
+    LibraryTrack,
+  ];
+
+  test("adds library tracks in request order and classifies missing and failed IDs", async () => {
+    const { exec, playlistTracks } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: [track0] },
+      failDuplicate: [track3.id],
+    });
+    const operations = createTrackOperations(exec);
+
+    await expect(
+      operations.addTracksToPlaylist("PLAYLIST12345678", [
+        track2.id,
+        "FFFFFFFFFFFFFFF0",
+        track3.id,
+        track1.id,
+      ]),
+    ).resolves.toEqual({
+      playlistId: "PLAYLIST12345678",
+      requested: 4,
+      added: 2,
+      addedTrackIds: [track2.id, track1.id],
+      missingTrackIds: ["FFFFFFFFFFFFFFF0"],
+      failedTrackIds: [track3.id],
+    });
+    expect(playlistTracks).toEqual([track0, track2, track1]);
+  });
+
+  test("matches IDs regardless of case and echoes them as requested", async () => {
+    const { exec, playlistTracks } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: [] },
+    });
+    const operations = createTrackOperations(exec);
+
+    const result = await operations.addTracksToPlaylist("playlist12345678", [
+      track1.id.toLowerCase(),
+    ]);
+    expect(result.addedTrackIds).toEqual([track1.id.toLowerCase()]);
+    expect(playlistTracks).toEqual([track1]);
+  });
+
+  test("reports every ID missing against an empty library", async () => {
+    const { exec } = fakeMusic({ library: [], playlist: { id: "PLAYLIST12345678", tracks: [] } });
+    const operations = createTrackOperations(exec);
+
+    const result = await operations.addTracksToPlaylist("PLAYLIST12345678", [track0.id]);
+    expect(result.missingTrackIds).toEqual([track0.id]);
+    expect(result.added).toBe(0);
+  });
+
+  test("fails with not_found when the playlist does not exist", async () => {
+    const { exec } = fakeMusic({ library });
+    const operations = createTrackOperations(exec);
+
+    await expect(
+      operations.addTracksToPlaylist("PLAYLIST12345678", [track0.id]),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  test("passes hostile IDs to Music as data, not code", async () => {
+    const hostile = `A"); throw new Error("pwned"); (\`${String.fromCharCode(0x2028)}`;
+    const { exec, playlistTracks } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: [] },
+    });
+    const operations = createTrackOperations(exec);
+
+    const result = await operations.addTracksToPlaylist("PLAYLIST12345678", [hostile, track0.id]);
+    expect(result.missingTrackIds).toEqual([hostile]);
+    expect(playlistTracks).toEqual([track0]);
+    await expect(operations.addTracksToPlaylist(hostile, [track0.id])).rejects.toMatchObject({
+      code: "not_found",
     });
   });
 });
