@@ -8,7 +8,7 @@ import {
   createPlaylistFromCriteriaTool,
 } from "./playlists.js";
 import { movePlaylistTool } from "./move.js";
-import { getNowPlayingTool, playbackControlTool } from "./playback.js";
+import { getNowPlayingTool, playbackControlTool, playTool, setPlayerTool } from "./playback.js";
 import { searchLibraryTool } from "./search.js";
 import {
   findTracksTool,
@@ -28,6 +28,8 @@ export {
   movePlaylistTool,
   getNowPlayingTool,
   playbackControlTool,
+  playTool,
+  setPlayerTool,
   searchLibraryTool,
   findTracksTool,
   getPlaylistTracksTool,
@@ -47,6 +49,8 @@ export const allTools: readonly AnyToolDef[] = [
   movePlaylistTool,
   getNowPlayingTool,
   playbackControlTool,
+  playTool,
+  setPlayerTool,
   searchLibraryTool,
   findTracksTool,
   getPlaylistTracksTool,

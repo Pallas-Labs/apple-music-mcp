@@ -19,6 +19,8 @@ import {
   createPlaylistTool,
   movePlaylistTool,
   playbackControlTool,
+  playTool,
+  setPlayerTool,
   removeTracksFromPlaylistTool,
 } from "./tools/index.js";
 
@@ -34,13 +36,13 @@ const ADDITIVE_ANNOTATIONS = {
   idempotentHint: false,
   openWorldHint: false,
 };
-const MOVE_ANNOTATIONS = {
+const IDEMPOTENT_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
 };
-const REMOVE_ANNOTATIONS = {
+const REIDEMPOTENT_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: true,
   idempotentHint: true,
@@ -55,14 +57,16 @@ const EXPECTED_ANNOTATIONS = {
   "music.create_playlist": ADDITIVE_ANNOTATIONS,
   "music.create_playlist_from_criteria": ADDITIVE_ANNOTATIONS,
   "music.create_folder": ADDITIVE_ANNOTATIONS,
-  "music.move_playlist": MOVE_ANNOTATIONS,
+  "music.move_playlist": IDEMPOTENT_ANNOTATIONS,
   "music.get_now_playing": READ_ANNOTATIONS,
   "music.playback_control": ADDITIVE_ANNOTATIONS,
+  "music.play": ADDITIVE_ANNOTATIONS,
+  "music.set_player": IDEMPOTENT_ANNOTATIONS,
   "music.search_library": READ_ANNOTATIONS,
   "music.find_tracks": READ_ANNOTATIONS,
   "music.get_playlist_tracks": READ_ANNOTATIONS,
   "music.add_tracks_to_playlist": ADDITIVE_ANNOTATIONS,
-  "music.remove_tracks_from_playlist": REMOVE_ANNOTATIONS,
+  "music.remove_tracks_from_playlist": REIDEMPOTENT_ANNOTATIONS,
 } as const;
 
 type TestClientOptions = {
@@ -341,6 +345,14 @@ describe("createServer", () => {
       {
         payload: playbackControlTool.dryRunResult({ action: "play" }),
         outputSchema: playbackControlTool.outputSchema,
+      },
+      {
+        payload: playTool.dryRunResult({ playlistId: "ABCDEF1234567890", shuffle: true }),
+        outputSchema: playTool.outputSchema,
+      },
+      {
+        payload: setPlayerTool.dryRunResult({ volume: 40, repeat: "all" }),
+        outputSchema: setPlayerTool.outputSchema,
       },
       {
         payload: addTracksToPlaylistTool.dryRunResult({
