@@ -12,6 +12,7 @@ import { createMcpHandler, inputRequired, inputResponse } from "@modelcontextpro
 import { runtimeConfig } from "./config.js";
 import { createServer, defineTool, toolErrorResult, type CreateServerOptions } from "./server.js";
 import { createDeletePlaylistTool, createPlaylistEditOperations } from "./tools/playlist-edits.js";
+import { createCriteriaPlaylistTool } from "./tools/playlists.js";
 import { MusicToolError } from "./types.js";
 import {
   addTracksToPlaylistTool,
@@ -404,6 +405,137 @@ describe("createServer", () => {
     for (const { payload, outputSchema } of cases) {
       expect(outputSchema.safeParse(payload).success).toBe(true);
     }
+  });
+});
+
+describe("mutation lock scope", () => {
+  const PLAYLIST_ID = "ABCDEF1234567890";
+  const TRACK_ID = "AAAABBBBCCCCDDDD";
+  const CRITERIA_ARGS = { name: "Eno", criteria: { artist: "Brian Eno" } };
+
+  /** A write tool with the default call-wide lock that runs only when `release` is called. */
+  function gatedWriteTool(events: string[]) {
+    const gate = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const tool = defineTool({
+      name: "test.write",
+      description: "Write after the test releases the gate.",
+      inputSchema: z.object({}),
+      outputSchema: z.object({ ok: z.boolean() }),
+      annotations: ADDITIVE_ANNOTATIONS,
+      writesRequired: true,
+      dryRunResult: () => ({ ok: false }),
+      async handler() {
+        events.push("other write start");
+        started.resolve();
+        await gate.promise;
+        events.push("other write end");
+        return { structuredContent: { ok: true } };
+      },
+    });
+    return { tool, started: started.promise, release: () => gate.resolve() };
+  }
+
+  function criteriaTool(events: string[], scanGate: Promise<void> = Promise.resolve()) {
+    const scanStarted = Promise.withResolvers<void>();
+    const tool = createCriteriaPlaylistTool({
+      async findTracks() {
+        events.push("scan start");
+        scanStarted.resolve();
+        await scanGate;
+        events.push("scan end");
+        return {
+          tracks: [
+            {
+              id: TRACK_ID,
+              name: "An Ending",
+              artist: "Brian Eno",
+              album: "Apollo",
+              genre: "Ambient",
+              duration: 266,
+              year: 1983,
+              playCount: 3,
+            },
+          ],
+          totalMatched: 1,
+          scanned: 1,
+          truncated: false,
+        };
+      },
+      async createPlaylist({ name }) {
+        events.push("create");
+        return { id: PLAYLIST_ID, name, isSmart: false, trackCount: 0 };
+      },
+      async addTracksToPlaylist(playlistId, trackIds) {
+        events.push("add");
+        return {
+          playlistId,
+          requested: trackIds.length,
+          added: trackIds.length,
+          addedTrackIds: trackIds,
+          missingTrackIds: [],
+          failedTrackIds: [],
+        };
+      },
+    });
+    return { tool, scanStarted: scanStarted.promise };
+  }
+
+  test("another write runs while create_playlist_from_criteria is still scanning", async () => {
+    const events: string[] = [];
+    const scanGate = Promise.withResolvers<void>();
+    const criteria = criteriaTool(events, scanGate.promise);
+    const other = gatedWriteTool(events);
+    other.release();
+
+    await withMcpClient(
+      async (client) => {
+        const pending = client.callTool({
+          name: "music.create_playlist_from_criteria",
+          arguments: CRITERIA_ARGS,
+        });
+        await criteria.scanStarted;
+
+        const write = await client.callTool({ name: "test.write", arguments: {} });
+        expect(write.structuredContent).toEqual({ ok: true });
+        expect(events).toEqual(["scan start", "other write start", "other write end"]);
+
+        scanGate.resolve();
+        const created = await pending;
+        expect(created.isError).toBeFalsy();
+        expect(created.structuredContent).toMatchObject({
+          playlist: { id: PLAYLIST_ID, name: "Eno", trackCount: 1 },
+          addedTrackIds: [TRACK_ID],
+        });
+      },
+      { server: { config: WRITES_ENABLED, tools: [criteria.tool, other.tool] } },
+    );
+    expect(events.slice(3)).toEqual(["scan end", "create", "add"]);
+  });
+
+  test("create_playlist_from_criteria waits for the lock before it creates the playlist", async () => {
+    const events: string[] = [];
+    const criteria = criteriaTool(events);
+    const other = gatedWriteTool(events);
+
+    await withMcpClient(
+      async (client) => {
+        const write = client.callTool({ name: "test.write", arguments: {} });
+        await other.started;
+        const created = client.callTool({
+          name: "music.create_playlist_from_criteria",
+          arguments: CRITERIA_ARGS,
+        });
+        await criteria.scanStarted;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(events).toEqual(["other write start", "scan start", "scan end"]);
+
+        other.release();
+        await Promise.all([write, created]);
+      },
+      { server: { config: WRITES_ENABLED, tools: [criteria.tool, other.tool] } },
+    );
+    expect(events.slice(3)).toEqual(["other write end", "create", "add"]);
   });
 });
 

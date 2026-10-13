@@ -72,6 +72,12 @@ type WriteToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = B
 > & {
   writesRequired: true;
   dryRunResult: (input: Args) => ToolSchemaOutput<Output>;
+  /**
+   * How much of the call holds the mutation lock. "call" (the default) locks the whole handler.
+   * "handler" leaves locking to the handler, which wraps only its mutating steps in
+   * withMutationLock so slow reads do not block other writes.
+   */
+  lock?: "call" | "handler";
 };
 
 export type ToolDef<

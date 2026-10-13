@@ -10,22 +10,13 @@ export type { ToolContext, ToolDef, ToolResult } from "./tool-contracts.js";
 import { SERVER_NAME, SERVER_VERSION, runtimeConfig, type RuntimeConfig } from "./config.js";
 import { MusicToolError } from "./types.js";
 import { log } from "./logger.js";
+import { withMutationLock } from "./mutation-lock.js";
 import { registerPrompts, registerResources, STATIC_CATALOGUE_CACHE_HINT } from "./mcp-features.js";
 import { allTools } from "./tools/index.js";
 
 // The largest valid input is 100 track IDs, so 512 leaves headroom and rejects floods early.
 const MAX_TOOL_INPUT_ELEMENTS = 512;
 
-let mutationQueue: Promise<void> = Promise.resolve();
-
-function withMutationLock<T>(operation: () => Promise<T>): Promise<T> {
-  const next = mutationQueue.then(operation, operation);
-  mutationQueue = next.then(
-    () => undefined,
-    () => undefined,
-  );
-  return next;
-}
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -162,11 +153,12 @@ function registerTool(server: McpServer, tool: AnyToolDef, config: RuntimeConfig
           };
         }
 
-        // Execute (with mutation lock for writes). Each round of a multi-round call takes the lock
-        // separately, so no lock is held while the client waits on the user.
+        // Each round of a multi-round call takes the lock separately, so no lock is held while the
+        // client waits on the user.
         const context = toolContext(server, ctx);
         const execute = () => tool.handler(input, context);
-        const result = tool.writesRequired ? await withMutationLock(execute) : await execute();
+        const lockCall = tool.writesRequired && tool.lock !== "handler";
+        const result = lockCall ? await withMutationLock(execute) : await execute();
         if (isInputRequiredResult(result)) {
           log("tool_input_required", {
             tool: tool.name,
