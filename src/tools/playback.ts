@@ -218,6 +218,18 @@ const setPlayerScriptResultSchema = z.discriminatedUnion("ok", [
   }),
 ]);
 
+/**
+ * Read the player state into pState until `settled` holds, for at most about 0.5 seconds.
+ * Music reports the old state for a moment after a command, and a slow start must still report.
+ */
+function waitForPlayerState(settled: string): string {
+  return `repeat 10 times
+                set pState to player state as text
+                if ${settled} then exit repeat
+                delay 0.05
+            end repeat`;
+}
+
 export function buildPlayScript(target: PlayTarget, shuffle: boolean | undefined): string {
   const safeId = escapeAppleScriptString(target.id);
   const source =
@@ -233,8 +245,7 @@ try
             if (count of matches) is 0 then return "{\\"found\\":false}"
             ${shuffleLine}
             play (item 1 of matches)
-            delay 0.3
-            set pState to player state as text
+            ${waitForPlayerState('pState is "playing"')}
             set trackJson to "null"
             if pState is not "stopped" then
                 try
@@ -329,21 +340,22 @@ on replaceText(findText, replaceText, sourceText)
 end replaceText
 `);
 
-const PLAYBACK_COMMANDS: Record<PlaybackAction, string> = {
-  play: "play",
-  pause: "pause",
-  next: "next track",
-  previous: "previous track",
-  toggle: "playpause",
+/** Each action's AppleScript command and the player-state condition that means it took effect. */
+const PLAYBACK_COMMANDS: Record<PlaybackAction, { command: string; settled: string }> = {
+  play: { command: "play", settled: 'pState is "playing"' },
+  pause: { command: "pause", settled: 'pState is "paused"' },
+  next: { command: "next track", settled: 'pState is "playing"' },
+  previous: { command: "previous track", settled: 'pState is "playing"' },
+  toggle: { command: "playpause", settled: "pState is not startState" },
 };
 
 function buildPlaybackControlScript(action: PlaybackAction): string {
   return buildScript(`
 try
     tell application id "com.apple.Music"
-        ${PLAYBACK_COMMANDS[action]}
-        delay 0.2
-        set pState to player state as text
+        set startState to player state as text
+        ${PLAYBACK_COMMANDS[action].command}
+        ${waitForPlayerState(PLAYBACK_COMMANDS[action].settled)}
         set stateStr to "stopped"
         if pState is "playing" then
             set stateStr to "playing"
