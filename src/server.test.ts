@@ -84,59 +84,49 @@ type TestClientOptions = {
   elicit?: (params: ElicitRequestFormParams) => ElicitResult;
 };
 
-function createTestClient(
-  name: string,
-  clientOptions: ClientOptions,
-  elicit?: TestClientOptions["elicit"],
-) {
-  const client = new Client(
-    { name, version: "1.0.0" },
-    elicit ? { ...clientOptions, capabilities: { elicitation: {} } } : clientOptions,
-  );
+const ERAS = ["2025-era", "2026-07-28"] as const;
+type Era = (typeof ERAS)[number];
+
+/** Connect a client of the given protocol era to a fresh server, run `run`, then close both. */
+async function withClient<T>(
+  era: Era,
+  run: (client: Client) => Promise<T>,
+  options: TestClientOptions = {},
+): Promise<T> {
+  const { elicit } = options;
+  const clientOptions: ClientOptions = {
+    ...(era === "2026-07-28" ? { versionNegotiation: { mode: "auto" } } : {}),
+    ...(elicit ? { capabilities: { elicitation: {} } } : {}),
+  };
+  const client = new Client({ name: "apple-music-mcp-test", version: "1.0.0" }, clientOptions);
   if (elicit) {
     client.setRequestHandler("elicitation/create", (request) =>
       elicit(request.params as ElicitRequestFormParams),
     );
   }
-  return client;
-}
 
-async function withMcpClient<T>(
-  run: (client: Client) => Promise<T>,
-  options: TestClientOptions = {},
-): Promise<T> {
-  const server = createServer(options.server);
-  const client = createTestClient("apple-music-mcp-test", {}, options.elicit);
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
-  await client.connect(clientTransport);
-  try {
-    return await run(client);
-  } finally {
-    await client.close();
-    await server.close();
+  let closeServer: () => Promise<void>;
+  if (era === "2025-era") {
+    const server = createServer(options.server);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    closeServer = () => server.close();
+  } else {
+    const handler = createMcpHandler(() => createServer(options.server));
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
+        fetch: (url, init) => handler.fetch(new Request(url, init)),
+      }),
+    );
+    closeServer = () => handler.close();
   }
-}
 
-async function withModernMcpClient<T>(
-  run: (client: Client) => Promise<T>,
-  options: TestClientOptions = {},
-): Promise<T> {
-  const handler = createMcpHandler(() => createServer(options.server));
-  const transport = new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
-    fetch: (url, init) => handler.fetch(new Request(url, init)),
-  });
-  const client = createTestClient(
-    "apple-music-mcp-modern-test",
-    { versionNegotiation: { mode: "auto" } },
-    options.elicit,
-  );
-  await client.connect(transport);
   try {
     return await run(client);
   } finally {
     await client.close();
-    await handler.close();
+    await closeServer();
   }
 }
 
@@ -171,7 +161,7 @@ const askTool = defineTool({
 
 describe("createServer", () => {
   test("registers all tools with schemas and exact annotations", async () => {
-    await withMcpClient(async (client) => {
+    await withClient("2025-era", async (client) => {
       const response = await client.listTools();
       expect(response.tools.map((tool) => tool.name)).toEqual(Object.keys(EXPECTED_ANNOTATIONS));
       for (const tool of response.tools) {
@@ -185,7 +175,7 @@ describe("createServer", () => {
   });
 
   test("music.capabilities lists every registered tool in order", async () => {
-    await withMcpClient(async (client) => {
+    await withClient("2025-era", async (client) => {
       const response = await client.callTool({ name: "music.capabilities", arguments: {} });
       expect(response.isError).toBeFalsy();
       expect(response.structuredContent?.tools).toEqual(Object.keys(EXPECTED_ANNOTATIONS));
@@ -194,7 +184,8 @@ describe("createServer", () => {
 
   test("music.capabilities reports the tools and config the server was created with", async () => {
     const config = { writesEnabled: true, dryRun: true };
-    const response = await withMcpClient(
+    const response = await withClient(
+      "2025-era",
       (client) => client.callTool({ name: "music.capabilities", arguments: {} }),
       { server: { config, tools: [askTool, capabilitiesTool] } },
     );
@@ -208,7 +199,7 @@ describe("createServer", () => {
   test.skipIf(runtimeConfig.writesEnabled)(
     "rejects writes before executing AppleScript",
     async () => {
-      await withMcpClient(async (client) => {
+      await withClient("2025-era", async (client) => {
         const response = await client.callTool({
           name: "music.create_playlist",
           arguments: { name: "Must Not Be Created" },
@@ -227,7 +218,7 @@ describe("createServer", () => {
   );
 
   test("serves the 2026-07-28 protocol with tools, resources, and prompts", async () => {
-    await withModernMcpClient(async (client) => {
+    await withClient("2026-07-28", async (client) => {
       expect(client.getProtocolEra()).toBe("modern");
 
       const [tools, resources, prompts] = await Promise.all([
@@ -257,7 +248,7 @@ describe("createServer", () => {
   });
 
   test("2026-07-28 results carry cache hints for the static catalogue", async () => {
-    await withModernMcpClient(async (client) => {
+    await withClient("2026-07-28", async (client) => {
       const staticHint = { ttlMs: 3_600_000, cacheScope: "private" };
       const [tools, prompts, resources, templates, guide] = await Promise.all([
         client.listTools(),
@@ -274,7 +265,7 @@ describe("createServer", () => {
   });
 
   test("2025-era results carry no cache fields", async () => {
-    await withMcpClient(async (client) => {
+    await withClient("2025-era", async (client) => {
       const [tools, guide] = await Promise.all([
         client.listTools(),
         client.readResource({ uri: "music://guide" }),
@@ -293,8 +284,8 @@ describe("createServer", () => {
         arguments: { padding: Array.from({ length: padding }, () => 0) },
       });
 
-    for (const withClient of [withMcpClient, withModernMcpClient]) {
-      await withClient(async (client) => {
+    for (const era of ERAS) {
+      await withClient(era, async (client) => {
         // One object member plus 511 array elements is exactly 512.
         const atLimit = await callWithElements(client, 511);
         expect(atLimit.isError).toBeFalsy();
@@ -313,9 +304,10 @@ describe("createServer", () => {
   });
 
   test("passes input-required rounds through to clients of both eras", async () => {
-    for (const withClient of [withMcpClient, withModernMcpClient]) {
+    for (const era of ERAS) {
       const messages: string[] = [];
       const answered = await withClient(
+        era,
         (client) => client.callTool({ name: "test.ask", arguments: {} }),
         {
           server: { config: WRITES_ENABLED, tools: [askTool] },
@@ -330,6 +322,7 @@ describe("createServer", () => {
       expect(messages).toEqual(["Go?"]);
 
       const unasked = await withClient(
+        era,
         (client) => client.callTool({ name: "test.ask", arguments: {} }),
         { server: { config: WRITES_ENABLED, tools: [askTool] } },
       );
@@ -472,6 +465,7 @@ describe("mutation lock scope", () => {
             },
           ],
           totalMatched: 1,
+          limit: 1,
           scanned: 1,
           truncated: false,
         };
@@ -502,7 +496,8 @@ describe("mutation lock scope", () => {
     const other = gatedWriteTool(events);
     other.release();
 
-    await withMcpClient(
+    await withClient(
+      "2025-era",
       async (client) => {
         const pending = client.callTool({
           name: "music.create_playlist_from_criteria",
@@ -532,7 +527,8 @@ describe("mutation lock scope", () => {
     const criteria = criteriaTool(events);
     const other = gatedWriteTool(events);
 
-    await withMcpClient(
+    await withClient(
+      "2025-era",
       async (client) => {
         const write = client.callTool({ name: "test.write", arguments: {} });
         await other.started;
@@ -592,15 +588,12 @@ describe("music.delete_playlist confirmation", () => {
     return JSON.parse(content.text) as { code: string; message: string };
   }
 
-  for (const [era, withClient] of [
-    ["2025-era", withMcpClient],
-    ["2026-07-28", withModernMcpClient],
-  ] as const) {
+  for (const era of ERAS) {
     test(`${era} client with elicitation deletes only after the user accepts`, async () => {
       const { deletedIds, server } = deleteServer();
       const prompts: string[] = [];
       // confirm: true must not skip the prompt when the client can show one.
-      const accepted = await withClient((client) => callDelete(client, { confirm: true }), {
+      const accepted = await withClient(era, (client) => callDelete(client, { confirm: true }), {
         server,
         elicit: (params) => {
           prompts.push(params.message);
@@ -625,7 +618,7 @@ describe("music.delete_playlist confirmation", () => {
       ];
       for (const answer of answers) {
         const { deletedIds, server } = deleteServer();
-        const response = await withClient((client) => callDelete(client), {
+        const response = await withClient(era, (client) => callDelete(client), {
           server,
           elicit: () => answer,
         });
@@ -639,7 +632,7 @@ describe("music.delete_playlist confirmation", () => {
 
     test(`${era} client without elicitation must pass confirm: true`, async () => {
       const unconfirmed = deleteServer();
-      const refused = await withClient((client) => callDelete(client), {
+      const refused = await withClient(era, (client) => callDelete(client), {
         server: unconfirmed.server,
       });
       const error = errorPayload(refused);
@@ -648,7 +641,7 @@ describe("music.delete_playlist confirmation", () => {
       expect(unconfirmed.deletedIds).toEqual([]);
 
       const confirmed = deleteServer();
-      const deleted = await withClient((client) => callDelete(client, { confirm: true }), {
+      const deleted = await withClient(era, (client) => callDelete(client, { confirm: true }), {
         server: confirmed.server,
       });
       expect(deleted.structuredContent).toEqual({
@@ -662,13 +655,17 @@ describe("music.delete_playlist confirmation", () => {
   test("refuses folders before prompting", async () => {
     const { deletedIds, server } = deleteServer("folder");
     const prompts: string[] = [];
-    const response = await withMcpClient((client) => callDelete(client, { confirm: true }), {
-      server,
-      elicit: (params) => {
-        prompts.push(params.message);
-        return { action: "accept", content: { confirm: true } };
+    const response = await withClient(
+      "2025-era",
+      (client) => callDelete(client, { confirm: true }),
+      {
+        server,
+        elicit: (params) => {
+          prompts.push(params.message);
+          return { action: "accept", content: { confirm: true } };
+        },
       },
-    });
+    );
     const error = errorPayload(response);
     expect(error.code).toBe("validation_error");
     expect(error.message).toStartWith('"Road Trip" is a folder.');
@@ -679,7 +676,7 @@ describe("music.delete_playlist confirmation", () => {
   test("dry run returns the preview without prompting or deleting", async () => {
     const { deletedIds, server } = deleteServer("user", { writesEnabled: true, dryRun: true });
     const prompts: string[] = [];
-    const response = await withMcpClient((client) => callDelete(client), {
+    const response = await withClient("2025-era", (client) => callDelete(client), {
       server,
       elicit: (params) => {
         prompts.push(params.message);
@@ -722,7 +719,7 @@ function undescribedProperties(schema: JsonSchemaNode, path: string): string[] {
 // 120 characters, and turn property descriptions into the JSDoc of generated signatures.
 describe("tool metadata for code-mode clients", () => {
   test("every input property at every depth has a description", async () => {
-    await withMcpClient(async (client) => {
+    await withClient("2025-era", async (client) => {
       const { tools } = await client.listTools();
       const missing = tools.flatMap((tool) =>
         undescribedProperties(tool.inputSchema as JsonSchemaNode, tool.name),
@@ -732,7 +729,7 @@ describe("tool metadata for code-mode clients", () => {
   });
 
   test("every tool description starts with a summary line of at most 120 characters", async () => {
-    await withMcpClient(async (client) => {
+    await withClient("2025-era", async (client) => {
       const { tools } = await client.listTools();
       const tooLong = tools
         .map((tool) => ({ name: tool.name, summary: tool.description?.split("\n")[0] ?? "" }))
