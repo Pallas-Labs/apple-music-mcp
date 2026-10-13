@@ -16,7 +16,7 @@ MCP server for controlling Apple Music on macOS via AppleScript. Implements MCP 
 | `music.list_playlists`                | List user playlists, optionally filtered by folder  | Read       |
 | `music.get_now_playing`               | Get current track info and player state             | Read       |
 | `music.search_library`                | Search library tracks by name/artist                | Read       |
-| `music.find_tracks`                   | Find tracks in a bounded 1,000-candidate window     | Read       |
+| `music.find_tracks`                   | Find library tracks by text, year, or play count    | Read       |
 | `music.get_playlist_tracks`           | Get tracks in a playlist (paginated)                | Read       |
 | `music.create_playlist`               | Create a playlist, optionally in a folder           | Write      |
 | `music.create_playlist_from_criteria` | Create a playlist from a bounded criteria match     | Write      |

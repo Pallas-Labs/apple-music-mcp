@@ -84,10 +84,14 @@ const createPlaylistFromCriteriaOutputSchema = z.object({
   failedTrackIds: z
     .array(z.string())
     .describe("IDs that were found in the library but could not be added to the playlist."),
-  scanned: z.number().describe("Number of candidate tracks examined, at most 1,000."),
+  scanned: z
+    .number()
+    .describe("Number of candidate tracks Music returned for the primary filter, at most 50,000."),
   truncated: z
     .boolean()
-    .describe("True when more candidates existed than were scanned, so matches may be missing."),
+    .describe(
+      "True when more than 50,000 candidates matched the primary filter, so matches may be missing.",
+    ),
 });
 
 export const listPlaylistsTool = defineTool({
