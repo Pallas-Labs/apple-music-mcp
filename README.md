@@ -4,7 +4,7 @@
 [![macOS only](https://img.shields.io/badge/platform-macOS-lightgrey)](https://github.com/parthmangrola/apple-music-mcp)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-MCP server for controlling Apple Music on macOS via AppleScript. Implements MCP 2026-07-28 and remains compatible with initialization-based 2025 clients over stdio. Works with Claude Code, Codex CLI, Cursor, and other MCP clients.
+MCP server for controlling Apple Music on macOS via AppleScript. Implements MCP 2026-07-28 and remains compatible with initialization-based 2025 clients over stdio. Works with Claude Code, Codex CLI, Cursor, OpenCode, and other MCP clients.
 
 ## Tools
 
@@ -137,6 +137,35 @@ Add to `~/.cursor/mcp.json`:
   }
 }
 ```
+
+### OpenCode
+
+Add to `opencode.json`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "apple_music": {
+        "type": "local",
+        "command": ["npx", "-y", "@pallas-labs/apple-music-mcp"],
+        "environment": {
+          "APPLE_MUSIC_MCP_ENABLE_WRITES": "false"
+        },
+        "protocol": "2026-07-28",
+        "timeout": {
+          "execution": 130000
+        }
+      }
+    }
+  }
+}
+```
+
+OpenCode runs MCP servers in Code Mode by default, and this server works with it. Use the key
+`apple_music` with an underscore. Scripts then call tools such as
+`tools.apple_music.music_find_tracks(...)`, and prompts appear as `/apple_music:curate-playlist`.
+The 130-second execution timeout is just above the server's longest AppleScript limit.
 
 ### Hardened Read-Only (Codex)
 
