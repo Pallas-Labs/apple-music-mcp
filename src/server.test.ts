@@ -18,6 +18,7 @@ import {
   createFolderTool,
   createPlaylistTool,
   movePlaylistTool,
+  renamePlaylistTool,
   playbackControlTool,
   playTool,
   setPlayerTool,
@@ -58,6 +59,7 @@ const EXPECTED_ANNOTATIONS = {
   "music.create_playlist_from_criteria": ADDITIVE_ANNOTATIONS,
   "music.create_folder": ADDITIVE_ANNOTATIONS,
   "music.move_playlist": IDEMPOTENT_ANNOTATIONS,
+  "music.rename_playlist": IDEMPOTENT_ANNOTATIONS,
   "music.get_now_playing": READ_ANNOTATIONS,
   "music.playback_control": ADDITIVE_ANNOTATIONS,
   "music.play": ADDITIVE_ANNOTATIONS,
@@ -341,6 +343,13 @@ describe("createServer", () => {
           targetFolderId: "12345678ABCDEFGH",
         }),
         outputSchema: movePlaylistTool.outputSchema,
+      },
+      {
+        payload: renamePlaylistTool.dryRunResult({
+          playlistId: "ABCDEF1234567890",
+          name: "Renamed",
+        }),
+        outputSchema: renamePlaylistTool.outputSchema,
       },
       {
         payload: playbackControlTool.dryRunResult({ action: "play" }),

@@ -17,7 +17,7 @@ import {
   type AddTracksResult,
 } from "./tracks.js";
 
-const playlistSchema = z.object({
+export const playlistSchema = z.object({
   id: z.string().describe("Persistent playlist ID."),
   name: z.string(),
   folderId: z
