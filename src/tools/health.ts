@@ -2,7 +2,6 @@ import * as z from "zod/v4";
 import { SERVER_VERSION, runtimeConfig } from "../config.js";
 import { runAppleScript } from "../applescript/runner.js";
 import { MusicToolError } from "../types.js";
-import type { MusicHealth } from "../types.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
 
 async function isMusicRunning(): Promise<boolean> {
@@ -45,7 +44,7 @@ end try
   return true;
 }
 
-async function getMusicHealth(): Promise<MusicHealth> {
+async function getMusicHealth() {
   const musicRunning = await isMusicRunning();
   let permissionGranted = false;
 

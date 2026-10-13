@@ -1,10 +1,9 @@
 import * as z from "zod/v4";
 import { nameSchema, persistentIdSchema } from "../config.js";
-import { runAppleScript } from "../applescript/runner.js";
 import { escapeAppleScriptString } from "../applescript/escape.js";
+import { parseAppleScriptJson } from "../applescript/parse.js";
+import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
-import { MusicToolError } from "../types.js";
-import type { Folder } from "../types.js";
 import {
   ADDITIVE_WRITE_ANNOTATIONS,
   defineTool,
@@ -20,6 +19,10 @@ const folderSchema = z.object({
     .optional()
     .describe("Persistent ID of the parent folder. Omitted for top-level folders."),
 });
+type Folder = z.output<typeof folderSchema>;
+const folderRowSchema = folderSchema
+  .pick({ id: true, name: true })
+  .extend({ parentId: z.string() });
 const listFoldersInputSchema = z.object({
   includeEmpty: z
     .boolean()
@@ -49,7 +52,7 @@ export const listFoldersTool = defineTool({
   annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
   async handler({ includeEmpty = true }) {
-    const folders = await listFolders(includeEmpty);
+    const folders = await folderOperations.listFolders(includeEmpty);
     return {
       structuredContent: { folders },
       logData: { folderCount: folders.length, includeEmpty },
@@ -78,12 +81,12 @@ export const createFolderTool = defineTool({
   async handler({ name, parentId }) {
     const input: { name: string; parentId?: string } = { name };
     if (parentId !== undefined) input.parentId = parentId;
-    const folder = await createFolder(input);
+    const folder = await folderOperations.createFolder(input);
     return { structuredContent: { folder }, logData: { folderId: folder.id } };
   },
 });
 
-async function listFolders(includeEmpty: boolean): Promise<Folder[]> {
+async function listFolders(includeEmpty: boolean, execFn: ExecFn | undefined): Promise<Folder[]> {
   const body = `
 try
     tell application id "com.apple.Music"
@@ -122,39 +125,22 @@ on jsonFolders(rows)
     return json & "]"
 end jsonFolders`;
 
-  const result = await runAppleScript(buildScript(body), 40_000);
-
-  let parsed: Array<{ id: string; name: string; parentId: string }>;
-  try {
-    parsed = JSON.parse(result.stdout) as Array<{ id: string; name: string; parentId: string }>;
-  } catch {
-    throw new MusicToolError("script_error", "Music returned an invalid folder payload.", {
-      outputLength: result.stdout.length,
-    });
-  }
-
-  const folders = parsed.map((f) => {
-    const parentId = f.parentId.trim();
-    const folder: Folder = {
-      id: f.id,
-      name: f.name,
-      isRoot: parentId.length === 0,
-    };
-    if (parentId.length > 0) {
-      folder.parentId = parentId;
-    }
-    return folder;
-  });
+  const result = await runAppleScript(buildScript(body), 40_000, execFn);
+  const folders = parseAppleScriptJson(
+    result.stdout,
+    z.array(folderRowSchema),
+    "Music returned an invalid folder payload.",
+  ).map(toFolder);
 
   if (includeEmpty) {
     return folders;
   }
 
-  const nonEmptyIds = await listNonEmptyFolderIds();
+  const nonEmptyIds = await listNonEmptyFolderIds(execFn);
   return folders.filter((folder) => nonEmptyIds.has(folder.id));
 }
 
-async function listNonEmptyFolderIds(): Promise<Set<string>> {
+async function listNonEmptyFolderIds(execFn: ExecFn | undefined): Promise<Set<string>> {
   const body = `
 try
     tell application id "com.apple.Music"
@@ -187,23 +173,19 @@ on jsonIdList(rows)
     return json & "]"
 end jsonIdList`;
 
-  const result = await runAppleScript(buildScript(body), 40_000);
-
-  let parsed: string[];
-  try {
-    parsed = JSON.parse(result.stdout) as string[];
-  } catch {
-    throw new MusicToolError(
-      "script_error",
-      "Music returned an invalid non-empty folder payload.",
-      { outputLength: result.stdout.length },
-    );
-  }
-
+  const result = await runAppleScript(buildScript(body), 40_000, execFn);
+  const parsed = parseAppleScriptJson(
+    result.stdout,
+    z.array(z.string()),
+    "Music returned an invalid non-empty folder payload.",
+  );
   return new Set(parsed.map((id) => id.trim()).filter((id) => id.length > 0));
 }
 
-async function createFolder(input: { name: string; parentId?: string }): Promise<Folder> {
+async function createFolder(
+  input: { name: string; parentId?: string },
+  execFn: ExecFn | undefined,
+): Promise<Folder> {
   const safeName = escapeAppleScriptString(input.name);
   const safeParentId = escapeAppleScriptString(input.parentId ?? "");
   const body = `
@@ -235,25 +217,31 @@ on jsonFolder(folderId, folderName, parentFolderId)
     return "{\\"id\\":\\"" & my jsonEscape(folderId) & "\\",\\"name\\":\\"" & my jsonEscape(folderName) & "\\",\\"parentId\\":\\"" & my jsonEscape(parentFolderId) & "\\"}"
 end jsonFolder`;
 
-  const result = await runAppleScript(buildScript(body), 40_000);
-
-  let parsed: { id: string; name: string; parentId: string };
-  try {
-    parsed = JSON.parse(result.stdout) as { id: string; name: string; parentId: string };
-  } catch {
-    throw new MusicToolError("script_error", "Music returned an invalid create folder payload.", {
-      outputLength: result.stdout.length,
-    });
-  }
-
-  const parentId = parsed.parentId.trim();
-  const folder: Folder = {
-    id: parsed.id,
-    name: parsed.name,
-    isRoot: parentId.length === 0,
-  };
-  if (parentId.length > 0) {
-    folder.parentId = parentId;
-  }
-  return folder;
+  const result = await runAppleScript(buildScript(body), 40_000, execFn);
+  return toFolder(
+    parseAppleScriptJson(
+      result.stdout,
+      folderRowSchema,
+      "Music returned an invalid create folder payload.",
+    ),
+  );
 }
+
+function toFolder(row: z.output<typeof folderRowSchema>): Folder {
+  const parentId = row.parentId.trim();
+  return {
+    id: row.id,
+    name: row.name,
+    isRoot: parentId.length === 0,
+    ...(parentId.length > 0 ? { parentId } : {}),
+  };
+}
+
+export function createFolderOperations(execFn?: ExecFn) {
+  return {
+    listFolders: (includeEmpty: boolean) => listFolders(includeEmpty, execFn),
+    createFolder: (input: { name: string; parentId?: string }) => createFolder(input, execFn),
+  };
+}
+
+const folderOperations = createFolderOperations();

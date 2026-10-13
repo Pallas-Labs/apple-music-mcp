@@ -18,27 +18,6 @@ export class MusicToolError extends Error {
   }
 }
 
-export type MusicHealth = {
-  musicRunning: boolean;
-  permissionGranted: boolean;
-  serverVersion: string;
-};
-
-export type Folder = {
-  id: string;
-  name: string;
-  isRoot: boolean;
-  parentId?: string;
-};
-
-export type Playlist = {
-  id: string;
-  name: string;
-  folderId?: string;
-  isSmart: boolean;
-  trackCount?: number;
-};
-
 export type Track = {
   id: string;
   name: string;
@@ -66,13 +45,4 @@ export type TrackCriteria = {
   playCountMax?: number | undefined;
   limit?: number | undefined;
   sortBy?: TrackSortBy | undefined;
-};
-
-export type NowPlaying = {
-  name: string;
-  artist: string;
-  album: string;
-  duration: number;
-  position: number;
-  playerState: "playing" | "paused" | "stopped";
 };

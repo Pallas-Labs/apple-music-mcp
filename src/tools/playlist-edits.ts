@@ -6,13 +6,12 @@ import { parseAppleScriptJson } from "../applescript/parse.js";
 import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
-import type { Playlist } from "../types.js";
 import {
   defineTool,
   DESTRUCTIVE_WRITE_ANNOTATIONS,
   IDEMPOTENT_WRITE_ANNOTATIONS,
 } from "../tool-contracts.js";
-import { playlistSchema } from "./playlists.js";
+import { playlistSchema, type Playlist } from "./playlists.js";
 
 const PLAYLIST_KINDS = ["user", "folder", "subscription", "system"] as const;
 type PlaylistKind = (typeof PLAYLIST_KINDS)[number];

@@ -1,11 +1,11 @@
 import * as z from "zod/v4";
 import { persistentIdSchema } from "../config.js";
-import { runAppleScript } from "../applescript/runner.js";
 import { escapeAppleScriptString } from "../applescript/escape.js";
+import { parseAppleScriptJson } from "../applescript/parse.js";
+import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
-import { MusicToolError } from "../types.js";
-import type { Playlist } from "../types.js";
 import { defineTool, IDEMPOTENT_WRITE_ANNOTATIONS } from "../tool-contracts.js";
+import { playlistRowSchema, type Playlist } from "./playlists.js";
 
 const movePlaylistInputSchema = z.object({
   playlistId: persistentIdSchema.describe(
@@ -47,7 +47,7 @@ export const movePlaylistTool = defineTool({
     };
   },
   async handler({ playlistId, targetFolderId }) {
-    const playlist = await movePlaylist({ playlistId, targetFolderId });
+    const playlist = await moveOperations.movePlaylist({ playlistId, targetFolderId });
     return {
       structuredContent: { playlist },
       logData: { playlistId, targetFolderId },
@@ -55,10 +55,10 @@ export const movePlaylistTool = defineTool({
   },
 });
 
-async function movePlaylist(input: {
-  playlistId: string;
-  targetFolderId: string;
-}): Promise<Playlist> {
+async function movePlaylist(
+  input: { playlistId: string; targetFolderId: string },
+  execFn: ExecFn | undefined,
+): Promise<Playlist> {
   const safePlaylistId = escapeAppleScriptString(input.playlistId);
   const safeFolderId = escapeAppleScriptString(input.targetFolderId);
   const body = `
@@ -99,30 +99,27 @@ on jsonPlaylist(playlistId, playlistName, parentFolderId, smartValue, trackCount
     return "{\\"id\\":\\"" & my jsonEscape(playlistId) & "\\",\\"name\\":\\"" & my jsonEscape(playlistName) & "\\",\\"folderId\\":\\"" & my jsonEscape(parentFolderId) & "\\",\\"isSmart\\":" & smartValue & ",\\"trackCount\\":" & trackCountValue & "}"
 end jsonPlaylist`;
 
-  const result = await runAppleScript(buildScript(body), 50_000);
-
-  let parsed: { id: string; name: string; folderId: string; isSmart: boolean; trackCount: number };
-  try {
-    parsed = JSON.parse(result.stdout) as {
-      id: string;
-      name: string;
-      folderId: string;
-      isSmart: boolean;
-      trackCount: number;
-    };
-  } catch {
-    throw new MusicToolError("script_error", "Music returned an invalid move playlist payload.", {
-      outputLength: result.stdout.length,
-    });
-  }
-
-  const output: Playlist = {
+  const result = await runAppleScript(buildScript(body), 50_000, execFn);
+  const parsed = parseAppleScriptJson(
+    result.stdout,
+    playlistRowSchema,
+    "Music returned an invalid move playlist payload.",
+  );
+  const folderId = parsed.folderId.trim();
+  return {
     id: parsed.id,
     name: parsed.name,
-    isSmart: Boolean(parsed.isSmart),
+    isSmart: parsed.isSmart,
+    ...(folderId.length > 0 ? { folderId } : {}),
+    trackCount: parsed.trackCount,
   };
-  const folderId = parsed.folderId.trim();
-  if (folderId.length > 0) output.folderId = folderId;
-  if (Number.isFinite(parsed.trackCount)) output.trackCount = parsed.trackCount;
-  return output;
 }
+
+export function createMoveOperations(execFn?: ExecFn) {
+  return {
+    movePlaylist: (input: { playlistId: string; targetFolderId: string }) =>
+      movePlaylist(input, execFn),
+  };
+}
+
+const moveOperations = createMoveOperations();

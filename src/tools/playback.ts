@@ -5,7 +5,6 @@ import { parseAppleScriptJson } from "../applescript/parse.js";
 import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript, buildRawScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
-import type { NowPlaying } from "../types.js";
 import {
   ADDITIVE_WRITE_ANNOTATIONS,
   defineTool,
@@ -107,6 +106,9 @@ export type PlayTarget = { kind: "playlist" | "track"; id: string };
 type PlayResult = ToolSchemaOutput<typeof playOutputSchema>;
 export type PlayerSettings = ToolSchemaOutput<typeof setPlayerInputSchema>;
 type PlayerStatus = ToolSchemaOutput<typeof setPlayerOutputSchema>;
+type NowPlaying = ToolSchemaOutput<typeof getNowPlayingOutputSchema>;
+type PlaybackAction = ToolSchemaOutput<typeof playbackControlInputSchema>["action"];
+type PlaybackControlResult = ToolSchemaOutput<typeof playbackControlOutputSchema>;
 
 export const getNowPlayingTool = defineTool({
   name: "music.get_now_playing",
@@ -117,7 +119,7 @@ export const getNowPlayingTool = defineTool({
   annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
   async handler() {
-    const nowPlaying = await getNowPlaying();
+    const nowPlaying = await playbackOperations.getNowPlaying();
     return { structuredContent: nowPlaying };
   },
 });
@@ -139,7 +141,7 @@ export const playbackControlTool = defineTool({
     };
   },
   async handler({ action }) {
-    const result = await controlPlayback(action);
+    const result = await playbackOperations.controlPlayback(action);
     return { structuredContent: result, logData: { action } };
   },
 });
@@ -279,48 +281,7 @@ on error errMsg number errNum
 end try`);
 }
 
-export function createPlaybackOperations(execFn?: ExecFn) {
-  return {
-    async play(target: PlayTarget, shuffle: boolean | undefined): Promise<PlayResult> {
-      const result = await runAppleScript(buildPlayScript(target, shuffle), 40_000, execFn);
-      const parsed = parseAppleScriptJson(
-        result.stdout,
-        playScriptResultSchema,
-        "Music returned an invalid play payload.",
-      );
-      if (!parsed.found) {
-        throw new MusicToolError("not_found", `No ${target.kind} has the ID ${target.id}.`);
-      }
-      return { playerState: toPlayerState(parsed.playerState), track: parsed.track };
-    },
-    async setPlayer(settings: PlayerSettings): Promise<PlayerStatus> {
-      const result = await runAppleScript(buildSetPlayerScript(settings), 20_000, execFn);
-      const parsed = parseAppleScriptJson(
-        result.stdout,
-        setPlayerScriptResultSchema,
-        "Music returned an invalid player settings payload.",
-      );
-      if (!parsed.ok) {
-        throw new MusicToolError(
-          "validation_error",
-          "The player is stopped, so there is no track to seek in. Start playback first.",
-        );
-      }
-      return {
-        volume: parsed.volume,
-        shuffle: parsed.shuffle,
-        repeat: parsed.repeat,
-        position: parsed.position,
-        playerState: toPlayerState(parsed.playerState),
-      };
-    },
-  };
-}
-
-const playbackOperations = createPlaybackOperations();
-
-export async function getNowPlaying(): Promise<NowPlaying> {
-  const script = buildRawScript(`
+const NOW_PLAYING_SCRIPT = buildRawScript(`
 try
     if application "Music" is not running then
         return "{\\"playerState\\":\\"stopped\\",\\"name\\":\\"\\",\\"artist\\":\\"\\",\\"album\\":\\"\\",\\"duration\\":0,\\"position\\":0}"
@@ -368,38 +329,19 @@ on replaceText(findText, replaceText, sourceText)
 end replaceText
 `);
 
-  const result = await runAppleScript(script, 10_000);
+const PLAYBACK_COMMANDS: Record<PlaybackAction, string> = {
+  play: "play",
+  pause: "pause",
+  next: "next track",
+  previous: "previous track",
+  toggle: "playpause",
+};
 
-  let parsed: NowPlaying;
-  try {
-    parsed = JSON.parse(result.stdout) as NowPlaying;
-  } catch {
-    throw new MusicToolError("script_error", "Music returned an invalid now playing payload.", {
-      outputLength: result.stdout.length,
-    });
-  }
-  return parsed;
-}
-
-type PlaybackAction = z.infer<typeof playbackControlInputSchema>["action"];
-
-async function controlPlayback(
-  action: PlaybackAction,
-): Promise<{ success: boolean; action: string; playerState: "playing" | "paused" | "stopped" }> {
-  const actionMap: Record<PlaybackAction, string> = {
-    play: "play",
-    pause: "pause",
-    next: "next track",
-    previous: "previous track",
-    toggle: "playpause",
-  };
-
-  const asAction = actionMap[action];
-
-  const script = buildScript(`
+function buildPlaybackControlScript(action: PlaybackAction): string {
+  return buildScript(`
 try
     tell application id "com.apple.Music"
-        ${asAction}
+        ${PLAYBACK_COMMANDS[action]}
         delay 0.2
         set pState to player state as text
         set stateStr to "stopped"
@@ -413,22 +355,61 @@ try
 on error errMsg number errNum
     error errMsg number errNum
 end try`);
-
-  const result = await runAppleScript(script, 15_000);
-
-  let parsed: { success: boolean; action: string; playerState: "playing" | "paused" | "stopped" };
-  try {
-    parsed = JSON.parse(result.stdout) as {
-      success: boolean;
-      action: string;
-      playerState: "playing" | "paused" | "stopped";
-    };
-  } catch {
-    throw new MusicToolError(
-      "script_error",
-      "Music returned an invalid playback control payload.",
-      { outputLength: result.stdout.length },
-    );
-  }
-  return parsed;
 }
+
+export function createPlaybackOperations(execFn?: ExecFn) {
+  return {
+    async getNowPlaying(): Promise<NowPlaying> {
+      const result = await runAppleScript(NOW_PLAYING_SCRIPT, 10_000, execFn);
+      return parseAppleScriptJson(
+        result.stdout,
+        getNowPlayingOutputSchema,
+        "Music returned an invalid now playing payload.",
+      );
+    },
+    async controlPlayback(action: PlaybackAction): Promise<PlaybackControlResult> {
+      const result = await runAppleScript(buildPlaybackControlScript(action), 15_000, execFn);
+      return parseAppleScriptJson(
+        result.stdout,
+        playbackControlOutputSchema,
+        "Music returned an invalid playback control payload.",
+      );
+    },
+    async play(target: PlayTarget, shuffle: boolean | undefined): Promise<PlayResult> {
+      const result = await runAppleScript(buildPlayScript(target, shuffle), 40_000, execFn);
+      const parsed = parseAppleScriptJson(
+        result.stdout,
+        playScriptResultSchema,
+        "Music returned an invalid play payload.",
+      );
+      if (!parsed.found) {
+        throw new MusicToolError("not_found", `No ${target.kind} has the ID ${target.id}.`);
+      }
+      return { playerState: toPlayerState(parsed.playerState), track: parsed.track };
+    },
+    async setPlayer(settings: PlayerSettings): Promise<PlayerStatus> {
+      const result = await runAppleScript(buildSetPlayerScript(settings), 20_000, execFn);
+      const parsed = parseAppleScriptJson(
+        result.stdout,
+        setPlayerScriptResultSchema,
+        "Music returned an invalid player settings payload.",
+      );
+      if (!parsed.ok) {
+        throw new MusicToolError(
+          "validation_error",
+          "The player is stopped, so there is no track to seek in. Start playback first.",
+        );
+      }
+      return {
+        volume: parsed.volume,
+        shuffle: parsed.shuffle,
+        repeat: parsed.repeat,
+        position: parsed.position,
+        playerState: toPlayerState(parsed.playerState),
+      };
+    },
+  };
+}
+
+const playbackOperations = createPlaybackOperations();
+export const getNowPlaying = playbackOperations.getNowPlaying;

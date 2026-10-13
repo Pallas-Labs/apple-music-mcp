@@ -1,10 +1,9 @@
 import * as z from "zod/v4";
-import { runAppleScript } from "../applescript/runner.js";
 import { escapeAppleScriptString } from "../applescript/escape.js";
+import { parseAppleScriptJson } from "../applescript/parse.js";
+import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
-import { MusicToolError } from "../types.js";
-import type { Track } from "../types.js";
-import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
+import { defineTool, READ_ONLY_ANNOTATIONS, type ToolSchemaOutput } from "../tool-contracts.js";
 import { durationOutputSchema, trackIdOutputSchema } from "./tracks.js";
 
 const searchLibraryInputSchema = z.object({
@@ -37,12 +36,18 @@ export const searchLibraryTool = defineTool({
   annotations: READ_ONLY_ANNOTATIONS,
   writesRequired: false,
   async handler({ query, limit }) {
-    const tracks = await searchLibrary(query, limit ?? 50);
+    const tracks = await searchOperations.searchLibrary(query, limit ?? 50);
     return { structuredContent: { tracks }, logData: { query, resultCount: tracks.length } };
   },
 });
 
-async function searchLibrary(query: string, limit: number): Promise<Track[]> {
+type SearchResult = ToolSchemaOutput<typeof searchLibraryOutputSchema>["tracks"];
+
+async function searchLibrary(
+  query: string,
+  limit: number,
+  execFn: ExecFn | undefined,
+): Promise<SearchResult> {
   const safeQuery = escapeAppleScriptString(query);
   const body = `
 try
@@ -88,15 +93,18 @@ on jsonTracks(rows)
     return json & "]"
 end jsonTracks`;
 
-  const result = await runAppleScript(buildScript(body), 30_000);
-
-  let parsed: Track[];
-  try {
-    parsed = JSON.parse(result.stdout) as Track[];
-  } catch {
-    throw new MusicToolError("script_error", "Music returned an invalid search payload.", {
-      outputLength: result.stdout.length,
-    });
-  }
-  return parsed;
+  const result = await runAppleScript(buildScript(body), 30_000, execFn);
+  return parseAppleScriptJson(
+    result.stdout,
+    searchLibraryOutputSchema.shape.tracks,
+    "Music returned an invalid search payload.",
+  );
 }
+
+export function createSearchOperations(execFn?: ExecFn) {
+  return {
+    searchLibrary: (query: string, limit: number) => searchLibrary(query, limit, execFn),
+  };
+}
+
+const searchOperations = createSearchOperations();
