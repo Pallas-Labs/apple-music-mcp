@@ -163,6 +163,66 @@ describe("createServer", () => {
     });
   });
 
+  test("2026-07-28 results carry cache hints: static catalogue for an hour, now-playing never", async () => {
+    await withModernMcpClient(async (client) => {
+      const staticHint = { ttlMs: 3_600_000, cacheScope: "private" };
+      const [tools, prompts, resources, templates, guide] = await Promise.all([
+        client.listTools(),
+        client.listPrompts(),
+        client.listResources(),
+        client.listResourceTemplates(),
+        client.readResource({ uri: "music://guide" }),
+      ]);
+      for (const result of [tools, prompts, resources, templates, guide]) {
+        expect(result).toMatchObject(staticHint);
+      }
+      expect(client.getDiscoverResult()).toMatchObject(staticHint);
+
+      // Runs read-only AppleScript; it reports "stopped" without launching Music.
+      const nowPlaying = await client.readResource({ uri: "music://now-playing" });
+      expect(nowPlaying).toMatchObject({ ttlMs: 0, cacheScope: "private" });
+    });
+  });
+
+  test("2025-era results carry no cache fields", async () => {
+    await withMcpClient(async (client) => {
+      const [tools, guide] = await Promise.all([
+        client.listTools(),
+        client.readResource({ uri: "music://guide" }),
+      ]);
+      for (const result of [tools, guide]) {
+        expect(result).not.toHaveProperty("ttlMs");
+        expect(result).not.toHaveProperty("cacheScope");
+      }
+    });
+  });
+
+  test("rejects tool arguments with more than 512 elements before the handler runs", async () => {
+    const callWithElements = (client: Client, padding: number) =>
+      client.callTool({
+        name: "music.capabilities",
+        arguments: { padding: Array.from({ length: padding }, () => 0) },
+      });
+
+    for (const withClient of [withMcpClient, withModernMcpClient]) {
+      await withClient(async (client) => {
+        // One object member plus 511 array elements is exactly 512.
+        const atLimit = await callWithElements(client, 511);
+        expect(atLimit.isError).toBeFalsy();
+
+        const overLimit = await callWithElements(client, 512);
+        expect(overLimit.isError).toBe(true);
+        expect(overLimit.structuredContent).toBeUndefined();
+        expect(overLimit.content).toEqual([
+          {
+            type: "text",
+            text: "Invalid arguments for tool music.capabilities: arguments contain more than the maximum of 512 elements",
+          },
+        ]);
+      });
+    }
+  });
+
   test("write tools provide exact dry-run payloads matching output schemas", () => {
     const cases = [
       {

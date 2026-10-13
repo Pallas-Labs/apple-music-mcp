@@ -6,8 +6,11 @@ export type { ToolDef, ToolResult } from "./tool-contracts.js";
 import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from "./config.js";
 import { MusicToolError } from "./types.js";
 import { log } from "./logger.js";
-import { registerPrompts, registerResources } from "./mcp-features.js";
+import { registerPrompts, registerResources, STATIC_CATALOGUE_CACHE_HINT } from "./mcp-features.js";
 import { allTools } from "./tools/index.js";
+
+// The largest valid input is 100 track IDs, so 512 leaves headroom and rejects floods early.
+const MAX_TOOL_INPUT_ELEMENTS = 512;
 
 let mutationQueue: Promise<void> = Promise.resolve();
 
@@ -62,6 +65,14 @@ export function createServer(): McpServer {
         resources: {},
         prompts: {},
       },
+      cacheHints: {
+        "tools/list": STATIC_CATALOGUE_CACHE_HINT,
+        "prompts/list": STATIC_CATALOGUE_CACHE_HINT,
+        "resources/list": STATIC_CATALOGUE_CACHE_HINT,
+        "resources/templates/list": STATIC_CATALOGUE_CACHE_HINT,
+        "server/discover": STATIC_CATALOGUE_CACHE_HINT,
+      },
+      maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
       instructions:
         "Call music.health first. Use music://guide for safe usage. Read tools are always safe. Mutation tools require APPLE_MUSIC_MCP_ENABLE_WRITES=true. IDs are persistent Apple Music IDs.",
     },

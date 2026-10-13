@@ -1,6 +1,14 @@
-import type { McpServer } from "@modelcontextprotocol/server";
+import type { CacheHint, McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { getNowPlaying } from "./tools/playback.js";
+
+// The catalogue is fixed for the process lifetime: env flags are read once at startup.
+export const STATIC_CATALOGUE_CACHE_HINT = Object.freeze({
+  ttlMs: 3_600_000,
+  cacheScope: "private",
+} satisfies CacheHint);
+
+const LIVE_CACHE_HINT = Object.freeze({ ttlMs: 0, cacheScope: "private" } satisfies CacheHint);
 
 const SERVER_GUIDE = `# Apple Music MCP guide
 
@@ -20,6 +28,7 @@ export function registerResources(server: McpServer): void {
       title: "Apple Music MCP guide",
       description: "Safe usage, identifiers, and write controls for this server.",
       mimeType: "text/markdown",
+      cacheHint: STATIC_CATALOGUE_CACHE_HINT,
     },
     async (uri) => ({
       contents: [{ uri: uri.href, mimeType: "text/markdown", text: SERVER_GUIDE }],
@@ -33,6 +42,7 @@ export function registerResources(server: McpServer): void {
       title: "Now playing",
       description: "The current Apple Music track and playback state.",
       mimeType: "application/json",
+      cacheHint: LIVE_CACHE_HINT,
     },
     async (uri) => ({
       contents: [
