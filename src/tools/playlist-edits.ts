@@ -95,7 +95,7 @@ const deleteConfirmationSchema = z.object({
  * Build a script that finds a playlist by ID, runs `edit` when the playlist's kind allows it, and
  * reports the playlist as JSON. Without an edit it only describes the playlist.
  */
-export function buildPlaylistScript(
+function buildPlaylistScript(
   playlistId: string,
   edit?: { kind: PlaylistEdit; statements: string },
 ): string {

@@ -230,7 +230,7 @@ function waitForPlayerState(settled: string): string {
             end repeat`;
 }
 
-export function buildPlayScript(target: PlayTarget, shuffle: boolean | undefined): string {
+function buildPlayScript(target: PlayTarget, shuffle: boolean | undefined): string {
   const safeId = escapeAppleScriptString(target.id);
   const source =
     target.kind === "playlist"
@@ -261,7 +261,7 @@ on error errMsg number errNum
 end try`);
 }
 
-export function buildSetPlayerScript(settings: PlayerSettings): string {
+function buildSetPlayerScript(settings: PlayerSettings): string {
   const writes = [
     settings.volume === undefined ? "" : `set sound volume to ${settings.volume}`,
     settings.shuffle === undefined ? "" : `set shuffle enabled to ${settings.shuffle}`,

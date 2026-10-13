@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { MusicToolError } from "../types.js";
-import { buildPlaylistScript, createPlaylistEditOperations } from "./playlist-edits.js";
+import { createPlaylistEditOperations } from "./playlist-edits.js";
 
 type Info = {
   kind: "user" | "folder" | "subscription" | "system";
@@ -37,31 +37,32 @@ async function errorOf(promise: Promise<unknown>): Promise<MusicToolError> {
   return error as MusicToolError;
 }
 
-describe("buildPlaylistScript", () => {
-  test("describes without editing when no edit is given", () => {
-    const script = buildPlaylistScript("ABCDEF1234567890");
-    expect(script).toContain('every playlist whose persistent ID is "ABCDEF1234567890"');
-    expect(script).toContain("if {} contains pKind then");
-  });
-
-  test("edits only the kinds that allow a rename", () => {
-    const script = buildPlaylistScript("ABCDEF1234567890", {
-      kind: "rename",
-      statements: 'set name of p to "x"',
+describe("createPlaylistEditOperations.describe", () => {
+  test("reports any kind of playlist, including ones that refuse edits", async () => {
+    const { operations } = recordingRunner(
+      playlistPayload({ kind: "folder", applied: false, folderId: "AAAA1111BBBB2222" }),
+    );
+    expect(await operations.describe("ABCDEF1234567890")).toEqual({
+      id: "ABCDEF1234567890",
+      name: "Road Trip",
+      kind: "folder",
+      isSmart: false,
+      trackCount: 12,
+      folderId: "AAAA1111BBBB2222",
+      applied: false,
     });
-    expect(script).toContain('if {"user", "folder"} contains pKind then');
   });
 });
 
 describe("createPlaylistEditOperations.delete", () => {
-  test("deletes only user playlists inside the same script that classifies them", async () => {
+  test("deletes a user playlist and returns what it deleted", async () => {
     const { scripts, operations } = recordingRunner(
       playlistPayload({ kind: "user", applied: true }),
     );
     const info = await operations.delete("ABCDEF1234567890");
-    expect(info.name).toBe("Road Trip");
+    expect(info).toMatchObject({ id: "ABCDEF1234567890", name: "Road Trip", trackCount: 12 });
+    // The kind check runs inside the delete script, so a stale describe cannot delete a folder.
     expect(scripts[0]).toContain('if {"user"} contains pKind then');
-    expect(scripts[0]).toContain("delete p\n");
   });
 
   test("refuses folders, subscriptions, and built-in playlists", async () => {
@@ -69,7 +70,15 @@ describe("createPlaylistEditOperations.delete", () => {
       const { operations } = recordingRunner(playlistPayload({ kind, applied: false }));
       const error = await errorOf(operations.delete("ABCDEF1234567890"));
       expect(error.code).toBe("validation_error");
+      expect(error.message).toStartWith('"Road Trip" is a');
     }
+  });
+
+  test("reports script_error when Music did not apply the delete", async () => {
+    const { operations } = recordingRunner(playlistPayload({ kind: "user", applied: false }));
+    const error = await errorOf(operations.delete("ABCDEF1234567890"));
+    expect(error.code).toBe("script_error");
+    expect(error.message).toBe('Music did not delete "Road Trip".');
   });
 });
 
@@ -81,6 +90,16 @@ describe("createPlaylistEditOperations.rename", () => {
     const info = await operations.rename("ABCDEF1234567890", 'Say "hi"\nnow');
     expect(info.name).toBe('Say "hi"\nnow');
     expect(scripts[0]).toContain('set name of p to "Say \\"hi\\"\\nnow"');
+  });
+
+  test("renames folders as well as user playlists", async () => {
+    const { operations } = recordingRunner(
+      playlistPayload({ kind: "folder", applied: true, name: "New" }),
+    );
+    expect(await operations.rename("ABCDEF1234567890", "New")).toMatchObject({
+      kind: "folder",
+      name: "New",
+    });
   });
 
   test("refuses built-in and subscription playlists with validation_error", async () => {
@@ -96,5 +115,6 @@ describe("createPlaylistEditOperations.rename", () => {
     const { operations } = recordingRunner('{"found":false}');
     const error = await errorOf(operations.rename("ABCDEF1234567890", "New"));
     expect(error.code).toBe("not_found");
+    expect(error.message).toBe("No playlist has the ID ABCDEF1234567890.");
   });
 });
