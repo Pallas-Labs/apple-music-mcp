@@ -72,10 +72,11 @@ It also provides two user-invoked prompts:
 
 ## Environment Variables
 
-| Variable                        | Default | Description                                                    |
-| ------------------------------- | ------- | -------------------------------------------------------------- |
-| `APPLE_MUSIC_MCP_ENABLE_WRITES` | `false` | Enable every Write tool in the table above                     |
-| `APPLE_MUSIC_MCP_DRY_RUN`       | `false` | Mutation tools return dry-run payloads without modifying Music |
+| Variable                        | Default | Description                                                             |
+| ------------------------------- | ------- | ----------------------------------------------------------------------- |
+| `APPLE_MUSIC_MCP_ENABLE_WRITES` | `false` | Enable every Write tool in the table above                              |
+| `APPLE_MUSIC_MCP_DRY_RUN`       | `false` | Mutation tools return dry-run payloads without modifying Music          |
+| `APPLE_MUSIC_MCP_HTTP_PORT`     | unset   | Serve Streamable HTTP at `http://127.0.0.1:<port>/mcp` instead of stdio |
 
 ## Setup (Recommended)
 
@@ -177,6 +178,20 @@ Add to `opencode.json`:
 OpenCode runs MCP servers in Code Mode by default, and this server works with it. Use the key
 `apple_music` with an underscore. Scripts then call tools such as
 `tools.apple_music.music_find_tracks(...)`, and prompts appear as `/apple_music:curate-playlist`.
+
+### Executor and other HTTP clients
+
+Clients that connect by URL, such as the Executor 2 desktop app, need the HTTP mode. Start the
+server with a port:
+
+```bash
+APPLE_MUSIC_MCP_HTTP_PORT=4319 npx -y @pallas-labs/apple-music-mcp
+```
+
+In Executor, select **Add app**, add a custom MCP server, and enter `http://127.0.0.1:4319/mcp`.
+The server listens only on 127.0.0.1, accepts only `localhost` and `127.0.0.1` Host headers, and
+refuses requests that carry an `Origin` header, so web pages cannot call it. To keep it running
+after you log out and in, run it from a launchd agent.
 
 ### Hardened Read-Only (Codex)
 

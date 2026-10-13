@@ -10,6 +10,8 @@
 - `music.delete_playlist` deletes a user playlist. Clients that support elicitation always show a
   confirmation prompt; other clients must pass `confirm: true`. Folders are refused.
 - `music.update_track` sets a track's favorite, dislike, and star rating.
+- `APPLE_MUSIC_MCP_HTTP_PORT` serves Streamable HTTP on 127.0.0.1, for clients that connect by
+  URL, such as Executor 2. Requests with an `Origin` header or a non-local Host are refused.
 - OpenCode setup in the README. The server works with OpenCode Code Mode.
 - MCP 2026-07-28 cache hints: list results and `music://guide` may be cached for one hour;
   `music://now-playing` is never cached.
