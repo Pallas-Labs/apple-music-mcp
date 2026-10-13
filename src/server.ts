@@ -74,7 +74,7 @@ export function createServer(): McpServer {
       },
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
       instructions:
-        "Call music.health first. Use music://guide for safe usage. Read tools are always safe. Mutation tools require APPLE_MUSIC_MCP_ENABLE_WRITES=true. IDs are persistent Apple Music IDs.",
+        "Call music.health first. Read tools never change Music. Write tools need APPLE_MUSIC_MCP_ENABLE_WRITES=true. Each result is structuredContent that matches the tool's outputSchema. Errors set isError and carry JSON text {code,message}. Pass persistent IDs from read results to later tools. If your client runs tools from code, chain read calls in one script. Bulk writes are not atomic, so check the returned ID lists. See music://guide.",
     },
   );
 

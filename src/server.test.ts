@@ -160,6 +160,10 @@ describe("createServer", () => {
 
       const guide = await client.readResource({ uri: "music://guide" });
       expect(guide.contents[0]?.text).toContain("music.health");
+
+      const instructions = client.getInstructions() ?? "";
+      expect(instructions).toContain("music.health");
+      expect(instructions.length).toBeLessThanOrEqual(500);
     });
   });
 

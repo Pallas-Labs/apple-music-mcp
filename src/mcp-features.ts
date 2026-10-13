@@ -18,6 +18,9 @@ const SERVER_GUIDE = `# Apple Music MCP guide
 4. Write tools require \`APPLE_MUSIC_MCP_ENABLE_WRITES=true\`.
 5. Set \`APPLE_MUSIC_MCP_DRY_RUN=true\` to preview write results without changing Music.
 6. Bulk AppleScript mutations are non-atomic and may partially succeed; inspect the returned ID lists.
+7. Each successful result is \`structuredContent\` that matches the tool's \`outputSchema\`.
+8. Errors set \`isError\` and return JSON text \`{"code": "...", "message": "..."}\`.
+9. Clients that run tools from code should chain read calls in one script and pass persistent IDs between tools.
 `;
 
 export function registerResources(server: McpServer): void {
