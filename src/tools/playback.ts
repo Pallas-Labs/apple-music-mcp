@@ -11,20 +11,26 @@ import {
 
 const getNowPlayingInputSchema = z.object({});
 const getNowPlayingOutputSchema = z.object({
-  name: z.string(),
-  artist: z.string(),
-  album: z.string(),
-  duration: z.number(),
-  position: z.number(),
+  name: z.string().describe("Track name. Empty when stopped."),
+  artist: z.string().describe("Track artist. Empty when stopped."),
+  album: z.string().describe("Track album. Empty when stopped."),
+  duration: z.number().describe("Track length in seconds. 0 when stopped."),
+  position: z.number().describe("Playback position in seconds. 0 when stopped."),
   playerState: z.enum(["playing", "paused", "stopped"]),
 });
 const playbackControlInputSchema = z.object({
-  action: z.enum(["play", "pause", "next", "previous", "toggle"]),
+  action: z
+    .enum(["play", "pause", "next", "previous", "toggle"])
+    .describe(
+      "Playback command. next and previous change tracks; toggle switches between play and pause.",
+    ),
 });
 const playbackControlOutputSchema = z.object({
   success: z.boolean(),
-  action: z.string(),
-  playerState: z.enum(["playing", "paused", "stopped"]),
+  action: z.string().describe("The action that ran."),
+  playerState: z
+    .enum(["playing", "paused", "stopped"])
+    .describe("Player state shortly after the action ran."),
 });
 
 export const getNowPlayingTool = defineTool({
@@ -43,7 +49,8 @@ export const getNowPlayingTool = defineTool({
 
 export const playbackControlTool = defineTool({
   name: "music.playback_control",
-  description: "Control Apple Music playback: play, pause, next, previous, or toggle play/pause.",
+  description:
+    "Control Apple Music playback: play, pause, next, previous, or toggle. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
   inputSchema: playbackControlInputSchema,
   outputSchema: playbackControlOutputSchema,
   annotations: ADDITIVE_WRITE_ANNOTATIONS,

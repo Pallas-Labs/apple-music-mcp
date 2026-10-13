@@ -8,14 +8,14 @@ const capabilitiesInputSchema = z.object({});
 const capabilitiesOutputSchema = z.object({
   serverName: z.string(),
   serverVersion: z.string(),
-  writesEnabled: z.boolean(),
-  dryRun: z.boolean(),
-  tools: z.array(z.string()),
+  writesEnabled: z.boolean().describe("True when mutation tools may change Apple Music."),
+  dryRun: z.boolean().describe("True when mutation tools return previews without changing Music."),
+  tools: z.array(z.string()).describe("Names of every tool this server provides."),
 });
 
 export const capabilitiesTool = defineTool({
   name: "music.capabilities",
-  description: "Report server capabilities and runtime flags.",
+  description: "Report the server version, write and dry-run flags, and the names of all tools.",
   inputSchema: capabilitiesInputSchema,
   outputSchema: capabilitiesOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,

@@ -7,17 +7,26 @@ import type { Track } from "../types.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
 
 const searchLibraryInputSchema = z.object({
-  query: z.string().trim().min(1).max(255).describe("Search query (matches track name or artist)."),
-  limit: z.number().int().min(1).max(50).optional().describe("Max results (default 50)."),
+  query: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .describe("Search text, 1-255 characters. Uses the Music app's library search."),
+  limit: z.number().int().min(1).max(50).optional().describe("Maximum results, 1-50 (default 50)."),
 });
 const searchLibraryOutputSchema = z.object({
   tracks: z.array(
     z.object({
-      id: z.string(),
+      id: z
+        .string()
+        .describe(
+          "Persistent track ID for music.add_tracks_to_playlist and music.remove_tracks_from_playlist.",
+        ),
       name: z.string(),
       artist: z.string(),
       album: z.string(),
-      duration: z.number(),
+      duration: z.number().describe("Track length in seconds."),
     }),
   ),
 });
@@ -25,7 +34,7 @@ const searchLibraryOutputSchema = z.object({
 export const searchLibraryTool = defineTool({
   name: "music.search_library",
   description:
-    "Search the Apple Music library for tracks by name or artist. Returns up to 50 results.",
+    "Search the Apple Music library for tracks by text and return up to 50 matches with persistent IDs.",
   inputSchema: searchLibraryInputSchema,
   outputSchema: searchLibraryOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,

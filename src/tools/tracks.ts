@@ -26,15 +26,22 @@ function hasDuplicateTrackIds(trackIds: string[]): boolean {
   return toCanonicalTrackIdSet(trackIds).size !== trackIds.length;
 }
 
+const trackIdOutputSchema = z
+  .string()
+  .describe(
+    "Persistent track ID for music.add_tracks_to_playlist and music.remove_tracks_from_playlist.",
+  );
+const durationOutputSchema = z.number().describe("Track length in seconds.");
+
 const libraryTrackSchema = z.object({
-  id: z.string(),
+  id: trackIdOutputSchema,
   name: z.string(),
   artist: z.string(),
   album: z.string(),
   genre: z.string(),
-  duration: z.number(),
-  year: z.number(),
-  playCount: z.number(),
+  duration: durationOutputSchema,
+  year: z.number().describe("Release year. 0 when unknown."),
+  playCount: z.number().describe("Number of times the track was played."),
 });
 
 export const trackCriteriaShape = {
@@ -66,15 +73,29 @@ export const trackCriteriaShape = {
     .max(255)
     .optional()
     .describe("Case-insensitive substring match against genre."),
-  yearMin: z.number().int().min(0).max(9999).optional(),
-  yearMax: z.number().int().min(0).max(9999).optional(),
-  playCountMin: z.number().int().min(0).optional(),
-  playCountMax: z.number().int().min(0).optional(),
+  yearMin: z
+    .number()
+    .int()
+    .min(0)
+    .max(9999)
+    .optional()
+    .describe("Earliest release year, inclusive. Tracks with no year have year 0."),
+  yearMax: z.number().int().min(0).max(9999).optional().describe("Latest release year, inclusive."),
+  playCountMin: z.number().int().min(0).optional().describe("Minimum play count, inclusive."),
+  playCountMax: z.number().int().min(0).optional().describe("Maximum play count, inclusive."),
   sortBy: z
     .enum(["name", "artist", "album", "year", "playCount"])
     .optional()
-    .describe("Sort order for returned tracks."),
-  limit: z.number().int().min(1).max(200).optional().describe("Max tracks to return (default 50)."),
+    .describe(
+      "Sort order (default name). name, artist, and album sort A to Z; year and playCount sort highest first.",
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Maximum tracks to return, 1-200 (default 50)."),
 } satisfies z.ZodRawShape;
 
 export const trackCriteriaSchema = z.object(trackCriteriaShape).superRefine((criteria, context) => {
@@ -117,30 +138,49 @@ export const trackCriteriaSchema = z.object(trackCriteriaShape).superRefine((cri
 });
 
 const findTracksOutputSchema = z.object({
-  tracks: z.array(libraryTrackSchema),
-  totalMatched: z.number(),
-  limit: z.number(),
-  scanned: z.number(),
-  truncated: z.boolean(),
+  tracks: z.array(libraryTrackSchema).describe("Matching tracks after sorting, at most limit."),
+  totalMatched: z
+    .number()
+    .describe(
+      "Number of scanned tracks that matched. When truncated is true, this is a lower bound within the scanned window, not a full-library total.",
+    ),
+  limit: z.number().describe("The limit that was applied."),
+  scanned: z.number().describe("Number of candidate tracks examined, at most 1,000."),
+  truncated: z
+    .boolean()
+    .describe("True when more candidates existed than were scanned, so matches may be missing."),
 });
 const getPlaylistTracksInputSchema = z.object({
-  playlistId: persistentIdSchema,
-  offset: z.number().int().min(0).optional().describe("Start index (default 0)."),
-  limit: z.number().int().min(1).max(100).optional().describe("Max tracks to return (default 50)."),
+  playlistId: persistentIdSchema.describe(
+    "Persistent playlist ID from music.list_playlists or music.create_playlist.",
+  ),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("Zero-based index of the first track to return (default 0)."),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe("Maximum tracks to return, 1-100 (default 50)."),
 });
 const getPlaylistTracksOutputSchema = z.object({
   tracks: z.array(
     z.object({
-      id: z.string(),
+      id: trackIdOutputSchema,
       name: z.string(),
       artist: z.string(),
       album: z.string(),
-      duration: z.number(),
+      duration: durationOutputSchema,
     }),
   ),
-  total: z.number(),
-  offset: z.number(),
-  limit: z.number(),
+  total: z.number().describe("Number of tracks in the whole playlist."),
+  offset: z.number().describe("The offset that was applied."),
+  limit: z.number().describe("The limit that was applied."),
 });
 export const trackIdsSchema = z
   .array(persistentIdSchema)
@@ -149,26 +189,51 @@ export const trackIdsSchema = z
   .refine((trackIds) => !hasDuplicateTrackIds(trackIds), {
     message: "Track IDs must be unique.",
   })
-  .describe("Unique persistent IDs of tracks.");
+  .describe(
+    "1-100 unique persistent track IDs from music.find_tracks, music.search_library, or music.get_playlist_tracks.",
+  );
 const trackMutationInputSchema = z.object({
-  playlistId: persistentIdSchema,
+  playlistId: persistentIdSchema.describe(
+    "Persistent playlist ID from music.list_playlists or music.create_playlist.",
+  ),
   trackIds: trackIdsSchema,
 });
+const requestedOutputSchema = z
+  .number()
+  .int()
+  .min(0)
+  .describe("Number of track IDs in the request.");
 const addTracksOutputSchema = z.object({
   playlistId: z.string(),
-  requested: z.number().int().min(0),
-  added: z.number().int().min(0),
-  addedTrackIds: z.array(z.string()),
-  missingTrackIds: z.array(z.string()),
-  failedTrackIds: z.array(z.string()),
+  requested: requestedOutputSchema,
+  added: z.number().int().min(0).describe("Number of tracks added. Equals addedTrackIds.length."),
+  addedTrackIds: z.array(z.string()).describe("Requested IDs that were added to the playlist."),
+  missingTrackIds: z
+    .array(z.string())
+    .describe("Requested IDs that were not found in the library."),
+  failedTrackIds: z
+    .array(z.string())
+    .describe("Requested IDs that were found in the library but could not be added."),
 });
 const removeTracksOutputSchema = z.object({
   playlistId: z.string(),
-  requested: z.number().int().min(0),
-  removed: z.number().int().min(0),
-  removedTrackIds: z.array(z.string()),
-  missingTrackIds: z.array(z.string()),
-  failedTrackIds: z.array(z.string()),
+  requested: requestedOutputSchema,
+  removed: z
+    .number()
+    .int()
+    .min(0)
+    .describe(
+      "Number of playlist entries deleted. Can exceed removedTrackIds.length when a track appears more than once.",
+    ),
+  removedTrackIds: z
+    .array(z.string())
+    .describe("Requested IDs with at least one playlist instance removed."),
+  missingTrackIds: z.array(z.string()).describe("Requested IDs with no instance in the playlist."),
+  failedTrackIds: z
+    .array(z.string())
+    .describe(
+      "Requested IDs with at least one instance that could not be removed. Can overlap removedTrackIds.",
+    ),
 });
 const addTracksResultSchema = addTracksOutputSchema;
 const removeTracksResultSchema = removeTracksOutputSchema;
@@ -186,7 +251,7 @@ export type RemoveTracksResult = ToolSchemaOutput<typeof removeTracksOutputSchem
 export const findTracksTool = defineTool({
   name: "music.find_tracks",
   description:
-    "Find library tracks by explicit criteria such as name, artist, album, genre, year, and play count.",
+    "Find library tracks by name, artist, album, genre, year, or play count, scanning at most 1,000 candidates.\nRequires at least one filter. When truncated is true, totalMatched is a lower bound, not a library total.",
   inputSchema: trackCriteriaSchema,
   outputSchema: findTracksOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
@@ -208,7 +273,7 @@ export const findTracksTool = defineTool({
 
 export const getPlaylistTracksTool = defineTool({
   name: "music.get_playlist_tracks",
-  description: "Get tracks in a playlist. Supports pagination via offset/limit.",
+  description: "Get one page of a playlist's tracks with persistent IDs, using offset and limit.",
   inputSchema: getPlaylistTracksInputSchema,
   outputSchema: getPlaylistTracksOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
@@ -224,7 +289,8 @@ export const getPlaylistTracksTool = defineTool({
 
 export const addTracksToPlaylistTool = defineTool({
   name: "music.add_tracks_to_playlist",
-  description: "Add tracks to a playlist by their persistent IDs.",
+  description:
+    "Add up to 100 unique tracks to a playlist by persistent ID and report per-ID outcomes.\nRequires APPLE_MUSIC_MCP_ENABLE_WRITES=true. Not atomic: check missingTrackIds and failedTrackIds.",
   inputSchema: trackMutationInputSchema,
   outputSchema: addTracksOutputSchema,
   annotations: ADDITIVE_WRITE_ANNOTATIONS,
@@ -256,7 +322,8 @@ export const addTracksToPlaylistTool = defineTool({
 
 export const removeTracksFromPlaylistTool = defineTool({
   name: "music.remove_tracks_from_playlist",
-  description: "Remove every matching instance of tracks from a playlist by persistent ID.",
+  description:
+    "Remove every instance of up to 100 unique tracks from a playlist and report per-ID outcomes.\nRequires APPLE_MUSIC_MCP_ENABLE_WRITES=true. Not atomic: check missingTrackIds and failedTrackIds.",
   inputSchema: trackMutationInputSchema,
   outputSchema: removeTracksOutputSchema,
   annotations: {

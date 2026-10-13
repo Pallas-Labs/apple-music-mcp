@@ -64,15 +64,20 @@ async function getMusicHealth(): Promise<MusicHealth> {
 const healthInputSchema = z.object({});
 const healthOutputSchema = z.object({
   musicRunning: z.boolean(),
-  permissionGranted: z.boolean(),
+  permissionGranted: z
+    .boolean()
+    .describe(
+      "True when macOS lets this process automate Music. Always false if Music is not running.",
+    ),
   serverVersion: z.string(),
-  writesEnabled: z.boolean(),
-  dryRun: z.boolean(),
+  writesEnabled: z.boolean().describe("True when mutation tools may change Apple Music."),
+  dryRun: z.boolean().describe("True when mutation tools return previews without changing Music."),
 });
 
 export const healthTool = defineTool({
   name: "music.health",
-  description: "Check Apple Music availability and automation permission status.",
+  description:
+    "Check that Apple Music is running and that automation permission is granted. Call this first.",
   inputSchema: healthInputSchema,
   outputSchema: healthOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,

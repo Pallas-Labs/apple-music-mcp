@@ -12,20 +12,30 @@ import {
 } from "../tool-contracts.js";
 
 const folderSchema = z.object({
-  id: z.string(),
+  id: z.string().describe("Persistent folder ID."),
   name: z.string(),
-  isRoot: z.boolean(),
-  parentId: z.string().optional(),
+  isRoot: z.boolean().describe("True when the folder is at the top level of the library."),
+  parentId: z
+    .string()
+    .optional()
+    .describe("Persistent ID of the parent folder. Omitted for top-level folders."),
 });
 const listFoldersInputSchema = z.object({
-  includeEmpty: z.boolean().optional(),
+  includeEmpty: z
+    .boolean()
+    .optional()
+    .describe("Include folders that directly contain no playlists (default true)."),
 });
 const listFoldersOutputSchema = z.object({
   folders: z.array(folderSchema),
 });
 const createFolderInputSchema = z.object({
-  name: nameSchema,
-  parentId: persistentIdSchema.optional(),
+  name: nameSchema.describe("Folder name, 1-255 characters."),
+  parentId: persistentIdSchema
+    .optional()
+    .describe(
+      "Persistent folder ID from music.list_folders or music.create_folder. Omit to create at the top level.",
+    ),
 });
 const createFolderOutputSchema = z.object({
   folder: folderSchema,
@@ -33,7 +43,7 @@ const createFolderOutputSchema = z.object({
 
 export const listFoldersTool = defineTool({
   name: "music.list_folders",
-  description: "List Apple Music folder playlists.",
+  description: "List Apple Music folder playlists with their persistent IDs and parent folder IDs.",
   inputSchema: listFoldersInputSchema,
   outputSchema: listFoldersOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
@@ -49,7 +59,8 @@ export const listFoldersTool = defineTool({
 
 export const createFolderTool = defineTool({
   name: "music.create_folder",
-  description: "Create a folder playlist, optionally inside a parent folder.",
+  description:
+    "Create a folder playlist, optionally inside a parent folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
   inputSchema: createFolderInputSchema,
   outputSchema: createFolderOutputSchema,
   annotations: ADDITIVE_WRITE_ANNOTATIONS,

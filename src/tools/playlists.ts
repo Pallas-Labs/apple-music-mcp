@@ -18,46 +18,82 @@ import {
 } from "./tracks.js";
 
 const playlistSchema = z.object({
-  id: z.string(),
+  id: z.string().describe("Persistent playlist ID."),
   name: z.string(),
-  folderId: z.string().optional(),
-  isSmart: z.boolean(),
-  trackCount: z.number().optional(),
+  folderId: z
+    .string()
+    .optional()
+    .describe("Persistent ID of the parent folder. Omitted for top-level playlists."),
+  isSmart: z.boolean().describe("True for smart playlists and built-in special playlists."),
+  trackCount: z
+    .number()
+    .optional()
+    .describe("Number of tracks. Omitted by music.list_playlists to keep listing fast."),
 });
 const listPlaylistsInputSchema = z.object({
-  folderId: persistentIdSchema.optional(),
-  includeRoot: z.boolean().optional(),
+  folderId: persistentIdSchema
+    .optional()
+    .describe(
+      "Persistent folder ID from music.list_folders or music.create_folder. Returns only playlists directly inside it.",
+    ),
+  includeRoot: z
+    .boolean()
+    .optional()
+    .describe("Include top-level playlists (default true). Ignored when folderId is set."),
 });
 const listPlaylistsOutputSchema = z.object({
   playlists: z.array(playlistSchema),
 });
 const createPlaylistInputSchema = z.object({
-  name: nameSchema,
-  folderId: persistentIdSchema.optional(),
+  name: nameSchema.describe("Playlist name, 1-255 characters."),
+  folderId: persistentIdSchema
+    .optional()
+    .describe(
+      "Persistent folder ID from music.list_folders or music.create_folder. Omit to create at the top level.",
+    ),
 });
 const createPlaylistOutputSchema = z.object({
   playlist: playlistSchema,
 });
 const createPlaylistFromCriteriaInputSchema = z.object({
-  name: nameSchema,
-  folderId: persistentIdSchema.optional(),
-  criteria: trackCriteriaSchema,
+  name: nameSchema.describe("Playlist name, 1-255 characters."),
+  folderId: persistentIdSchema
+    .optional()
+    .describe(
+      "Persistent folder ID from music.list_folders or music.create_folder. Omit to create at the top level.",
+    ),
+  criteria: trackCriteriaSchema.describe(
+    "Track filters, with the same rules as music.find_tracks. At least one filter is required.",
+  ),
 });
 const createPlaylistFromCriteriaOutputSchema = z.object({
   playlist: playlistSchema,
-  matched: z.number(),
-  requested: z.number(),
-  added: z.number(),
-  addedTrackIds: z.array(z.string()),
-  missingTrackIds: z.array(z.string()),
-  failedTrackIds: z.array(z.string()),
-  scanned: z.number(),
-  truncated: z.boolean(),
+  matched: z
+    .number()
+    .describe(
+      "Number of scanned tracks that matched. When truncated is true, this is a lower bound within the scanned window, not a full-library total.",
+    ),
+  requested: z
+    .number()
+    .describe("Number of matched tracks the server tried to add, at most criteria.limit."),
+  added: z.number().describe("Number of tracks added. Equals addedTrackIds.length."),
+  addedTrackIds: z.array(z.string()).describe("Persistent IDs of tracks added to the playlist."),
+  missingTrackIds: z
+    .array(z.string())
+    .describe("IDs that were not found in the library when the server tried to add them."),
+  failedTrackIds: z
+    .array(z.string())
+    .describe("IDs that were found in the library but could not be added to the playlist."),
+  scanned: z.number().describe("Number of candidate tracks examined, at most 1,000."),
+  truncated: z
+    .boolean()
+    .describe("True when more candidates existed than were scanned, so matches may be missing."),
 });
 
 export const listPlaylistsTool = defineTool({
   name: "music.list_playlists",
-  description: "List Apple Music user playlists. Optionally filter by folder ID.",
+  description:
+    "List Apple Music user playlists with their persistent IDs, optionally only those inside one folder.",
   inputSchema: listPlaylistsInputSchema,
   outputSchema: listPlaylistsOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
@@ -76,7 +112,8 @@ export const listPlaylistsTool = defineTool({
 
 export const createPlaylistTool = defineTool({
   name: "music.create_playlist",
-  description: "Create a user playlist, optionally inside a folder.",
+  description:
+    "Create an empty user playlist, optionally inside a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
   inputSchema: createPlaylistInputSchema,
   outputSchema: createPlaylistOutputSchema,
   annotations: ADDITIVE_WRITE_ANNOTATIONS,
@@ -105,7 +142,8 @@ export const createPlaylistTool = defineTool({
 
 export const createPlaylistFromCriteriaTool = defineTool({
   name: "music.create_playlist_from_criteria",
-  description: "Create a playlist from explicit bounded library search criteria.",
+  description:
+    "Create a playlist and add the tracks music.find_tracks would return for the same criteria.\nRequires APPLE_MUSIC_MCP_ENABLE_WRITES=true. Bulk adds are not atomic; check the returned ID lists.",
   inputSchema: createPlaylistFromCriteriaInputSchema,
   outputSchema: createPlaylistFromCriteriaOutputSchema,
   annotations: ADDITIVE_WRITE_ANNOTATIONS,

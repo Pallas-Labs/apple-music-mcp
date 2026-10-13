@@ -285,6 +285,53 @@ describe("createServer", () => {
   });
 });
 
+type JsonSchemaNode = {
+  description?: string;
+  properties?: Record<string, JsonSchemaNode>;
+  items?: JsonSchemaNode;
+  anyOf?: JsonSchemaNode[];
+  oneOf?: JsonSchemaNode[];
+  allOf?: JsonSchemaNode[];
+};
+
+function undescribedProperties(schema: JsonSchemaNode, path: string): string[] {
+  const nested = [
+    ...Object.entries(schema.properties ?? {}).flatMap(([name, property]) => [
+      ...(property.description?.trim() ? [] : [`${path}.${name}`]),
+      ...undescribedProperties(property, `${path}.${name}`),
+    ]),
+    ...(schema.items ? undescribedProperties(schema.items, `${path}[]`) : []),
+    ...[...(schema.anyOf ?? []), ...(schema.oneOf ?? []), ...(schema.allOf ?? [])].flatMap(
+      (variant) => undescribedProperties(variant, path),
+    ),
+  ];
+  return nested;
+}
+
+// Code-mode clients such as OpenCode show only the first line of a tool description, cut at
+// 120 characters, and turn property descriptions into the JSDoc of generated signatures.
+describe("tool metadata for code-mode clients", () => {
+  test("every input property at every depth has a description", async () => {
+    await withMcpClient(async (client) => {
+      const { tools } = await client.listTools();
+      const missing = tools.flatMap((tool) =>
+        undescribedProperties(tool.inputSchema as JsonSchemaNode, tool.name),
+      );
+      expect(missing).toEqual([]);
+    });
+  });
+
+  test("every tool description starts with a summary line of at most 120 characters", async () => {
+    await withMcpClient(async (client) => {
+      const { tools } = await client.listTools();
+      const tooLong = tools
+        .map((tool) => ({ name: tool.name, summary: tool.description?.split("\n")[0] ?? "" }))
+        .filter(({ summary }) => summary.trim().length === 0 || summary.length > 120);
+      expect(tooLong).toEqual([]);
+    });
+  });
+});
+
 describe("toolErrorResult", () => {
   test("omits internal details from known errors", () => {
     const result = toolErrorResult(

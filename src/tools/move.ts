@@ -8,22 +8,29 @@ import type { Playlist } from "../types.js";
 import { defineTool } from "../tool-contracts.js";
 
 const movePlaylistInputSchema = z.object({
-  playlistId: persistentIdSchema,
-  targetFolderId: persistentIdSchema,
+  playlistId: persistentIdSchema.describe(
+    "Persistent playlist ID from music.list_playlists or music.create_playlist.",
+  ),
+  targetFolderId: persistentIdSchema.describe(
+    "Persistent folder ID from music.list_folders or music.create_folder.",
+  ),
 });
 const movePlaylistOutputSchema = z.object({
   playlist: z.object({
-    id: z.string(),
+    id: z.string().describe("Persistent playlist ID."),
     name: z.string(),
-    folderId: z.string().optional(),
-    isSmart: z.boolean(),
-    trackCount: z.number().optional(),
+    folderId: z
+      .string()
+      .optional()
+      .describe("Persistent ID of the folder now holding the playlist."),
+    isSmart: z.boolean().describe("True for smart playlists and built-in special playlists."),
+    trackCount: z.number().optional().describe("Number of tracks in the playlist."),
   }),
 });
 
 export const movePlaylistTool = defineTool({
   name: "music.move_playlist",
-  description: "Move a playlist into a target folder.",
+  description: "Move a user playlist into a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
   inputSchema: movePlaylistInputSchema,
   outputSchema: movePlaylistOutputSchema,
   annotations: {
