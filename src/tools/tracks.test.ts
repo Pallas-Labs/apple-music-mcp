@@ -90,20 +90,23 @@ const MUSIC_NOT_FOUND = "Can't get object. (-1728)";
  */
 function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: LibraryTrack[] } {
   const playlistTracks = [...(options.playlist?.tracks ?? [])];
+  // Each playlist entry carries its own database ID in Music, distinct from the library track's.
+  const entryIds = playlistTracks.map((_, index) => 1000 + index);
+  let nextEntryId = 1000 + playlistTracks.length;
   const failDuplicate = new Set(options.failDuplicate ?? []);
   const failDeleteAt = new Set(options.failDeleteAt ?? []);
   const libraryDatabaseId = (track: LibraryTrack) => options.library.indexOf(track) + 1;
 
   type Spec = { kind: "library" | "playlist"; index: number };
   function collection(kind: Spec["kind"], tracks: () => LibraryTrack[]) {
-    const column = (read: (track: LibraryTrack) => unknown) => () => {
+    const column = (read: (track: LibraryTrack, index: number) => unknown) => () => {
       if (tracks().length === 0) throw new Error(MUSIC_NOT_FOUND);
       return tracks().map(read);
     };
     const target: Record<string | symbol, unknown> = {
       persistentID: column((track) => track.id),
-      id: column((track) =>
-        kind === "library" ? libraryDatabaseId(track) : 1000 + playlistTracks.indexOf(track),
+      id: column((track, index) =>
+        kind === "library" ? libraryDatabaseId(track) : entryIds[index],
       ),
       name: column((track) => track.name),
       artist: column((track) => track.artist),
@@ -116,7 +119,7 @@ function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: L
         const index =
           kind === "library"
             ? options.library.findIndex((track) => libraryDatabaseId(track) === databaseId)
-            : databaseId - 1000;
+            : entryIds.indexOf(databaseId);
         if (index < 0 || index >= tracks().length) throw new Error(MUSIC_NOT_FOUND);
         return { kind, index };
       },
@@ -173,6 +176,8 @@ function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: L
         throw new Error("Music got an error: Can't make or move that element into that container.");
       }
       playlistTracks.push(track);
+      entryIds.push(nextEntryId);
+      nextEntryId += 1;
     },
     delete: (spec: Spec) => {
       if (spec.kind !== "playlist" || spec.index >= playlistTracks.length) {
@@ -180,6 +185,7 @@ function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: L
       }
       if (failDeleteAt.has(spec.index)) throw new Error("Music got an error: Can't delete.");
       playlistTracks.splice(spec.index, 1);
+      entryIds.splice(spec.index, 1);
     },
   };
 
@@ -481,6 +487,108 @@ describe("createTrackOperations.addTracksToPlaylist", () => {
     expect(result.missingTrackIds).toEqual([hostile]);
     expect(playlistTracks).toEqual([track0]);
     await expect(operations.addTracksToPlaylist(hostile, [track0.id])).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+});
+
+describe("createTrackOperations.removeTracksFromPlaylist", () => {
+  const library = libraryOf(4);
+  const [trackA, trackB, trackC] = library as [LibraryTrack, LibraryTrack, LibraryTrack];
+
+  test("removes every instance of each requested track and reports missing IDs", async () => {
+    const { exec, playlistTracks } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: [trackA, trackB, trackA, trackC] },
+    });
+    const operations = createTrackOperations(exec);
+
+    const result = await operations.removeTracksFromPlaylist("PLAYLIST12345678", [
+      trackA.id,
+      trackC.id,
+      "FFFFFFFFFFFFFFF0",
+    ]);
+    expect(result).toMatchObject({
+      playlistId: "PLAYLIST12345678",
+      requested: 3,
+      removed: 3,
+      missingTrackIds: ["FFFFFFFFFFFFFFF0"],
+      failedTrackIds: [],
+    });
+    expect([...result.removedTrackIds].sort()).toEqual([trackA.id, trackC.id].sort());
+    expect(playlistTracks).toEqual([trackB]);
+  });
+
+  test("reports a track as both removed and failed when one instance resists deletion", async () => {
+    const { exec, playlistTracks } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: [trackA, trackB, trackA] },
+      failDeleteAt: [0],
+    });
+    const operations = createTrackOperations(exec);
+
+    await expect(
+      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id]),
+    ).resolves.toEqual({
+      playlistId: "PLAYLIST12345678",
+      requested: 1,
+      removed: 1,
+      removedTrackIds: [trackA.id],
+      missingTrackIds: [],
+      failedTrackIds: [trackA.id],
+    });
+    expect(playlistTracks).toEqual([trackA, trackB]);
+  });
+
+  test("matches IDs regardless of case and echoes them as requested", async () => {
+    const { exec, playlistTracks } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: [trackA, trackB] },
+    });
+    const operations = createTrackOperations(exec);
+
+    const result = await operations.removeTracksFromPlaylist("playlist12345678", [
+      trackB.id.toLowerCase(),
+    ]);
+    expect(result.removedTrackIds).toEqual([trackB.id.toLowerCase()]);
+    expect(playlistTracks).toEqual([trackA]);
+  });
+
+  test("reports every ID missing against an empty playlist", async () => {
+    const { exec } = fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: [] } });
+    const operations = createTrackOperations(exec);
+
+    await expect(
+      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id, trackB.id]),
+    ).resolves.toMatchObject({
+      removed: 0,
+      removedTrackIds: [],
+      missingTrackIds: [trackA.id, trackB.id],
+      failedTrackIds: [],
+    });
+  });
+
+  test("fails with not_found when the playlist does not exist", async () => {
+    const { exec } = fakeMusic({ library });
+    const operations = createTrackOperations(exec);
+
+    await expect(
+      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id]),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  test("passes hostile IDs to Music as data, not code", async () => {
+    const hostile = `A"); throw new Error("pwned"); (\`${String.fromCharCode(0x2029)}`;
+    const { exec, playlistTracks } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: [trackA] },
+    });
+    const operations = createTrackOperations(exec);
+
+    const result = await operations.removeTracksFromPlaylist("PLAYLIST12345678", [hostile]);
+    expect(result.missingTrackIds).toEqual([hostile]);
+    expect(playlistTracks).toEqual([trackA]);
+    await expect(operations.removeTracksFromPlaylist(hostile, [trackA.id])).rejects.toMatchObject({
       code: "not_found",
     });
   });

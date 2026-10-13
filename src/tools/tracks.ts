@@ -591,52 +591,45 @@ async function removeTracksFromPlaylistWithRunner(
   trackIds: string[],
 ): Promise<RemoveTracksResult> {
   assertUniqueTrackIds(trackIds);
-  const safePlaylistId = escapeAppleScriptString(playlistId);
-  const idList = trackIds.map((id) => `"${escapeAppleScriptString(id)}"`).join(", ");
+  // Every playlist entry has its own database ID, so deleting by that ID stays correct even if
+  // the playlist shifts under the script; the reverse walk only keeps the pairing with entryIds.
   const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 60 seconds
-            set targetPlaylist to first user playlist whose persistent ID is "${safePlaylistId}"
-            set targetTrackIds to {${idList}}
-            set removedCount to 0
-            set removedTrackIds to {}
-            set failedTrackIds to {}
-            set playlistTracks to tracks of targetPlaylist
-            repeat with i from (count of playlistTracks) to 1 by -1
-                set t to item i of playlistTracks
-                try
-                    set trackId to persistent ID of t as text
-                    if targetTrackIds contains trackId then
-                        try
-                            delete t
-                            set removedCount to removedCount + 1
-                            if removedTrackIds does not contain trackId then
-                                set end of removedTrackIds to trackId
-                            end if
-                        on error
-                            if failedTrackIds does not contain trackId then
-                                set end of failedTrackIds to trackId
-                            end if
-                        end try
-                    end if
-                end try
-            end repeat
-            set missingTrackIds to {}
-            repeat with tid in targetTrackIds
-                set trackId to tid as text
-                if removedTrackIds does not contain trackId and failedTrackIds does not contain trackId then
-                    set end of missingTrackIds to trackId
-                end if
-            end repeat
-            return "{\\"playlistId\\":\\"${safePlaylistId}\\",\\"requested\\":" & (count of targetTrackIds) & ",\\"removed\\":" & removedCount & ",\\"removedTrackIds\\":" & my jsonStringArray(removedTrackIds) & ",\\"missingTrackIds\\":" & my jsonStringArray(missingTrackIds) & ",\\"failedTrackIds\\":" & my jsonStringArray(failedTrackIds) & "}"
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try`;
+const requestedIds = ${toJavaScriptLiteral(trackIds)};
+const playlistId = ${toJavaScriptLiteral(playlistId)};
+${PIN_USER_PLAYLIST}
+const entryIds = playlist.tracks.length > 0 ? playlist.tracks.persistentID() : [];
+const databaseIds = playlist.tracks.length > 0 ? playlist.tracks.id() : [];
+if (entryIds.length !== databaseIds.length) {
+    throw new Error("Music playlist changed while reading tracks.");
+}
+const requestedByCanonicalId = new Map(requestedIds.map((id) => [id.toUpperCase(), id]));
+let removed = 0;
+const removedTrackIds = new Set();
+const failedTrackIds = new Set();
+for (let index = entryIds.length - 1; index >= 0; index -= 1) {
+    const trackId = requestedByCanonicalId.get(entryIds[index].toUpperCase());
+    if (trackId === undefined) continue;
+    try {
+        music.delete(playlist.tracks.byId(databaseIds[index]));
+        removed += 1;
+        removedTrackIds.add(trackId);
+    } catch (error) {
+        failedTrackIds.add(trackId);
+    }
+}
+const missingTrackIds = requestedIds.filter(
+    (id) => !removedTrackIds.has(id) && !failedTrackIds.has(id),
+);
+JSON.stringify({
+    playlistId,
+    requested: requestedIds.length,
+    removed,
+    removedTrackIds: [...removedTrackIds],
+    missingTrackIds,
+    failedTrackIds: [...failedTrackIds],
+});`;
 
-  const result = await runAppleScript(buildScript(body), 60_000, execFn);
+  const result = await runJavaScript(buildJavaScript(body), 60_000, execFn);
 
   const parsed = parseAppleScriptJson(
     result.stdout,
