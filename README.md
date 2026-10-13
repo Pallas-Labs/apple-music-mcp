@@ -41,11 +41,13 @@ and should do so only after the user approves. A declined or cancelled prompt de
 
 ### Track matching and bulk mutation results
 
-`music.find_tracks` requires at least one text or numeric filter. It scans at most 1,000
-candidate tracks and returns `tracks`, `totalMatched`, `limit`, `scanned`, and `truncated`.
-When `truncated` is `true`, `totalMatched` is a lower bound within the scanned window, not a
-full-library total. `music.create_playlist_from_criteria` reports the same `scanned` and
-`truncated` values; its `matched` field has the same lower-bound rule.
+`music.find_tracks` requires at least one text or numeric filter. Music applies the most
+selective filter across the whole library, the server reads the candidates in bulk and applies
+the remaining filters, then sorts and limits. It returns `tracks`, `totalMatched`, `limit`,
+`scanned`, and `truncated`. `scanned` is the number of candidates Music returned, capped at
+50,000 for memory safety. `truncated` is `true` only when that cap was hit; then `totalMatched`
+is a lower bound, not a full-library total. `music.create_playlist_from_criteria` reports the
+same `scanned` and `truncated` values; its `matched` field has the same lower-bound rule.
 
 Add and remove requests reject duplicate track IDs. Add results contain `playlistId`,
 `requested`, `added`, `addedTrackIds`, `missingTrackIds`, and `failedTrackIds`. A missing ID
@@ -243,9 +245,11 @@ The server auto-launches Music. If it fails, open Music manually first.
 See the [Permissions](#permissions) section above.
 
 **"AppleScript command timed out"**
-Large libraries can be slow. Bounded track discovery allows up to 120 seconds, while playlist
-listing allows up to 70 seconds. In Codex, set `tool_timeout_sec = 130` for this server. If you
-still hit timeouts, run `music.health` first to warm up the connection.
+Large libraries can be slow. Track discovery usually finishes in a few seconds because Music
+filters the library and the server reads matches in bulk, but it allows up to 120 seconds for
+very large libraries. Playlist listing allows up to 70 seconds. In Codex, set
+`tool_timeout_sec = 130` for this server. If you still hit timeouts, run `music.health` first to
+warm up the connection.
 
 **Mutations are non-atomic**
 AppleScript doesn't support transactions. Bulk operations may partially succeed. Inspect the

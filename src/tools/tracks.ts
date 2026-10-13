@@ -1,8 +1,9 @@
 import * as z from "zod/v4";
 import { persistentIdSchema } from "../config.js";
-import { runAppleScript } from "../applescript/runner.js";
-import { escapeAppleScriptString } from "../applescript/escape.js";
-import { buildScript } from "../applescript/templates.js";
+import { runAppleScript, runJavaScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
+import { escapeAppleScriptString, toJavaScriptLiteral } from "../applescript/escape.js";
+import { buildJavaScript, buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { LibraryTrack, Track, TrackCriteria, TrackSortBy } from "../types.js";
 import {
@@ -12,7 +13,18 @@ import {
   type ToolSchemaOutput,
 } from "../tool-contracts.js";
 
-export const FIND_TRACKS_CANDIDATE_CAP = 1_000;
+/** Cap on candidate rows returned from Music, bounding payload size and server memory. */
+export const FIND_TRACKS_CANDIDATE_CAP = 50_000;
+
+/** Track property paired with the criteria field that substring-matches it. */
+const TEXT_FILTERS = [
+  ["name", "nameQuery"],
+  ["artist", "artist"],
+  ["album", "album"],
+  ["genre", "genre"],
+] as const;
+
+const textCollator = new Intl.Collator("en", { sensitivity: "base" });
 
 function canonicalTrackId(trackId: string): string {
   return trackId.toUpperCase();
@@ -142,13 +154,19 @@ const findTracksOutputSchema = z.object({
   totalMatched: z
     .number()
     .describe(
-      "Number of scanned tracks that matched. When truncated is true, this is a lower bound within the scanned window, not a full-library total.",
+      "Number of scanned tracks that matched every filter. When truncated is true, this is a lower bound, not a full-library total.",
     ),
   limit: z.number().describe("The limit that was applied."),
-  scanned: z.number().describe("Number of candidate tracks examined, at most 1,000."),
+  scanned: z
+    .number()
+    .describe(
+      "Number of candidate tracks Music returned for the primary filter and that were examined, at most 50,000.",
+    ),
   truncated: z
     .boolean()
-    .describe("True when more candidates existed than were scanned, so matches may be missing."),
+    .describe(
+      "True when more than 50,000 candidates matched the primary filter, so matches may be missing.",
+    ),
 });
 const getPlaylistTracksInputSchema = z.object({
   playlistId: persistentIdSchema.describe(
@@ -251,7 +269,7 @@ export type RemoveTracksResult = ToolSchemaOutput<typeof removeTracksOutputSchem
 export const findTracksTool = defineTool({
   name: "music.find_tracks",
   description:
-    "Find library tracks by name, artist, album, genre, year, or play count, scanning at most 1,000 candidates.\nRequires at least one filter. When truncated is true, totalMatched is a lower bound, not a library total.",
+    "Find library tracks by name, artist, album, genre, year, or play count across the whole library.\nRequires at least one filter. Up to 50,000 candidates are examined; when truncated is true, totalMatched is a lower bound.",
   inputSchema: trackCriteriaSchema,
   outputSchema: findTracksOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
@@ -359,75 +377,53 @@ export const removeTracksFromPlaylistTool = defineTool({
 });
 
 async function findTracksWithRunner(
-  run: typeof runAppleScript,
+  execFn: ExecFn | undefined,
   criteria: TrackCriteria,
 ): Promise<FindTracksResult> {
   const validatedCriteria = trackCriteriaSchema.parse(criteria);
-  const seedQuery = pickTrackSearchSeed(validatedCriteria);
-  const safeSeedQuery = escapeAppleScriptString(seedQuery ?? "");
+  const prefilter = pickFindTracksPrefilter(validatedCriteria);
+  const whoseLiteral = prefilter
+    ? toJavaScriptLiteral({ [prefilter.property]: { [prefilter.operator]: prefilter.value } })
+    : "null";
 
+  // Music accepts only one comparison per whose clause from JXA; the rest is filtered in TS.
+  // Property reads on an empty whose result throw, so the count check guards them.
   const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 120 seconds
-            if "${safeSeedQuery}" is not "" then
-                set sourceTracks to (search library playlist 1 for "${safeSeedQuery}" only all)
-            else
-                set sourceTracks to tracks of library playlist 1
-            end if
+const whose = ${whoseLiteral};
+const library = music.libraryPlaylists[0];
+const candidates = whose ? library.tracks.whose(whose) : library.tracks;
+let candidateCount = candidates.length;
+const tracks = [];
+if (candidateCount > 0) {
+    const ids = candidates.persistentID();
+    const names = candidates.name();
+    const artists = candidates.artist();
+    const albums = candidates.album();
+    const genres = candidates.genre();
+    const durations = candidates.duration();
+    const years = candidates.year();
+    const playCounts = candidates.playedCount();
+    const columns = [names, artists, albums, genres, durations, years, playCounts];
+    if (columns.some((column) => column.length !== ids.length)) {
+        throw new Error("Music library changed while reading tracks.");
+    }
+    candidateCount = ids.length;
+    for (let i = 0; i < Math.min(candidateCount, ${FIND_TRACKS_CANDIDATE_CAP}); i += 1) {
+        tracks.push({
+            id: ids[i],
+            name: names[i],
+            artist: artists[i],
+            album: albums[i],
+            genre: genres[i],
+            duration: durations[i],
+            year: years[i],
+            playCount: playCounts[i],
+        });
+    }
+}
+JSON.stringify({ tracks, scanned: tracks.length, truncated: candidateCount > tracks.length });`;
 
-            set sourceCount to count of sourceTracks
-            set scannedCount to sourceCount
-            if scannedCount > ${FIND_TRACKS_CANDIDATE_CAP} then set scannedCount to ${FIND_TRACKS_CANDIDATE_CAP}
-            set truncatedValue to "false"
-            if sourceCount > scannedCount then set truncatedValue to "true"
-
-            set trackRows to {}
-            if scannedCount > 0 then
-                repeat with i from 1 to scannedCount
-                    set t to item i of sourceTracks
-                    try
-                        set trackId to persistent ID of t as text
-                        set trackName to name of t as text
-                        set trackArtist to artist of t as text
-                        set trackAlbum to album of t as text
-                        set trackGenre to genre of t as text
-                        set trackDuration to duration of t
-                        set trackYear to year of t
-                        set trackPlayCount to played count of t
-
-                        set end of trackRows to {trackId, trackName, trackArtist, trackAlbum, trackGenre, trackDuration, trackYear, trackPlayCount}
-                    end try
-                end repeat
-            end if
-            return "{\\"tracks\\":" & my jsonTracks(trackRows) & ",\\"scanned\\":" & scannedCount & ",\\"truncated\\":" & truncatedValue & "}"
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try
-
-on jsonTracks(rows)
-    set serializedRows to {}
-    repeat with row in rows
-        set tId to item 1 of row
-        set tName to item 2 of row
-        set tArtist to item 3 of row
-        set tAlbum to item 4 of row
-        set tGenre to item 5 of row
-        set tDuration to item 6 of row
-        set tYear to item 7 of row
-        set tPlayCount to item 8 of row
-        set end of serializedRows to "{\\"id\\":\\"" & my jsonEscape(tId as text) & "\\",\\"name\\":\\"" & my jsonEscape(tName as text) & "\\",\\"artist\\":\\"" & my jsonEscape(tArtist as text) & "\\",\\"album\\":\\"" & my jsonEscape(tAlbum as text) & "\\",\\"genre\\":\\"" & my jsonEscape(tGenre as text) & "\\",\\"duration\\":" & tDuration & ",\\"year\\":" & tYear & ",\\"playCount\\":" & tPlayCount & "}"
-    end repeat
-    set previousDelimiters to AppleScript's text item delimiters
-    set AppleScript's text item delimiters to ","
-    set json to serializedRows as text
-    set AppleScript's text item delimiters to previousDelimiters
-    return "[" & json & "]"
-end jsonTracks`;
-
-  const result = await run(buildScript(body), 120_000);
+  const result = await runJavaScript(buildJavaScript(body), 120_000, execFn);
 
   const parsed = parseAppleScriptJsonOutput(
     result.stdout,
@@ -516,7 +512,7 @@ end jsonTracks`;
 }
 
 async function addTracksToPlaylistWithRunner(
-  run: typeof runAppleScript,
+  execFn: ExecFn | undefined,
   playlistId: string,
   trackIds: string[],
 ): Promise<AddTracksResult> {
@@ -555,7 +551,7 @@ on error errMsg number errNum
     error errMsg number errNum
 end try`;
 
-  const result = await run(buildScript(body), 60_000);
+  const result = await runAppleScript(buildScript(body), 60_000, execFn);
 
   const parsed = parseAppleScriptJsonOutput(
     result.stdout,
@@ -577,7 +573,7 @@ end try`;
 }
 
 async function removeTracksFromPlaylistWithRunner(
-  run: typeof runAppleScript,
+  execFn: ExecFn | undefined,
   playlistId: string,
   trackIds: string[],
 ): Promise<RemoveTracksResult> {
@@ -627,7 +623,7 @@ on error errMsg number errNum
     error errMsg number errNum
 end try`;
 
-  const result = await run(buildScript(body), 60_000);
+  const result = await runAppleScript(buildScript(body), 60_000, execFn);
 
   const parsed = parseAppleScriptJsonOutput(
     result.stdout,
@@ -706,13 +702,13 @@ function assertUniqueTrackIds(trackIds: string[]): void {
   }
 }
 
-export function createTrackOperations(run: typeof runAppleScript = runAppleScript) {
+export function createTrackOperations(execFn?: ExecFn) {
   return {
-    findTracks: (criteria: TrackCriteria) => findTracksWithRunner(run, criteria),
+    findTracks: (criteria: TrackCriteria) => findTracksWithRunner(execFn, criteria),
     addTracksToPlaylist: (playlistId: string, trackIds: string[]) =>
-      addTracksToPlaylistWithRunner(run, playlistId, trackIds),
+      addTracksToPlaylistWithRunner(execFn, playlistId, trackIds),
     removeTracksFromPlaylist: (playlistId: string, trackIds: string[]) =>
-      removeTracksFromPlaylistWithRunner(run, playlistId, trackIds),
+      removeTracksFromPlaylistWithRunner(execFn, playlistId, trackIds),
   };
 }
 
@@ -754,23 +750,56 @@ function createTrackComparator(
 }
 
 function compareText(left: string, right: string): number {
-  return left.localeCompare(right, "en", { sensitivity: "base" });
+  return textCollator.compare(left, right);
 }
 
-export function pickTrackSearchSeed(criteria: TrackCriteria): string | undefined {
-  const candidates = [criteria.nameQuery, criteria.artist, criteria.album, criteria.genre]
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value))
-    .sort((left, right) => right.length - left.length);
+export type FindTracksPrefilter =
+  | { property: "name" | "artist" | "album" | "genre"; operator: "_contains"; value: string }
+  | {
+      property: "year" | "playedCount";
+      operator: "_greaterThanEquals" | "_lessThanEquals";
+      value: number;
+    };
 
-  return candidates[0];
+/**
+ * Choose the one comparison Music evaluates itself. The longest text filter wins because
+ * substring matches prune far more than year or play-count bounds. Numeric bounds fall back
+ * in the order that pruned most on a real library: play-count floor, year ceiling, year
+ * floor, play-count ceiling.
+ */
+export function pickFindTracksPrefilter(criteria: TrackCriteria): FindTracksPrefilter | undefined {
+  let longest: { property: (typeof TEXT_FILTERS)[number][0]; value: string } | undefined;
+  for (const [property, field] of TEXT_FILTERS) {
+    const value = criteria[field];
+    if (value && (!longest || value.length > longest.value.length)) {
+      longest = { property, value };
+    }
+  }
+  if (longest) return { ...longest, operator: "_contains" };
+
+  if (criteria.playCountMin !== undefined) {
+    return {
+      property: "playedCount",
+      operator: "_greaterThanEquals",
+      value: criteria.playCountMin,
+    };
+  }
+  if (criteria.yearMax !== undefined) {
+    return { property: "year", operator: "_lessThanEquals", value: criteria.yearMax };
+  }
+  if (criteria.yearMin !== undefined) {
+    return { property: "year", operator: "_greaterThanEquals", value: criteria.yearMin };
+  }
+  if (criteria.playCountMax !== undefined) {
+    return { property: "playedCount", operator: "_lessThanEquals", value: criteria.playCountMax };
+  }
+  return undefined;
 }
 
 export function matchesTrackCriteria(track: LibraryTrack, criteria: TrackCriteria): boolean {
-  if (!containsText(track.name, criteria.nameQuery)) return false;
-  if (!containsText(track.artist, criteria.artist)) return false;
-  if (!containsText(track.album, criteria.album)) return false;
-  if (!containsText(track.genre, criteria.genre)) return false;
+  for (const [property, field] of TEXT_FILTERS) {
+    if (!containsText(track[property], criteria[field])) return false;
+  }
   if (criteria.yearMin !== undefined && track.year < criteria.yearMin) return false;
   if (criteria.yearMax !== undefined && track.year > criteria.yearMax) return false;
   if (criteria.playCountMin !== undefined && track.playCount < criteria.playCountMin) return false;

@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import vm from "node:vm";
 import {
   FIND_TRACKS_CANDIDATE_CAP,
   createTrackOperations,
   matchesTrackCriteria,
-  pickTrackSearchSeed,
+  pickFindTracksPrefilter,
 } from "./tracks.js";
+import type { ExecFn, ScriptLanguage } from "../applescript/runner.js";
 import type { LibraryTrack } from "../types.js";
 
 const sampleTrack: LibraryTrack = {
@@ -18,24 +20,94 @@ const sampleTrack: LibraryTrack = {
   playCount: 7,
 };
 
-describe("pickTrackSearchSeed", () => {
+function trackColumns(tracks: LibraryTrack[]): Record<string, unknown[]> {
+  return {
+    persistentID: tracks.map((track) => track.id),
+    name: tracks.map((track) => track.name),
+    artist: tracks.map((track) => track.artist),
+    album: tracks.map((track) => track.album),
+    genre: tracks.map((track) => track.genre),
+    duration: tracks.map((track) => track.duration),
+    year: tracks.map((track) => track.year),
+    playCount: tracks.map((track) => track.playCount),
+  };
+}
+
+type ScriptCall = { language: ScriptLanguage; whoseArgument: unknown };
+
+/**
+ * An exec that runs the generated JXA against a fake Music library. The library answers every
+ * whose clause with the given columns, and throws on property reads of an empty result as Music
+ * does.
+ */
+function fakeMusicExec(columns: Record<string, unknown[]>): { exec: ExecFn; calls: ScriptCall[] } {
+  const calls: ScriptCall[] = [];
+  const count = columns["persistentID"]?.length ?? 0;
+  const collection: Record<string, unknown> = { length: count };
+  for (const [name, values] of Object.entries(columns)) {
+    collection[name === "playCount" ? "playedCount" : name] = () => {
+      if (count === 0) throw new Error("Can't get object.");
+      return values;
+    };
+  }
+  const exec: ExecFn = async (script, _timeoutMs, language) => {
+    const call: ScriptCall = { language, whoseArgument: "whose not called" };
+    calls.push(call);
+    const tracks = {
+      ...collection,
+      whose: (argument: unknown) => {
+        call.whoseArgument = argument;
+        return collection;
+      },
+    };
+    const Application = () => ({
+      running: () => true,
+      launch: () => undefined,
+      libraryPlaylists: [{ tracks }],
+    });
+    const stdout = vm.runInNewContext(script, { Application, delay: () => undefined });
+    return { stdout, stderr: "" };
+  };
+  return { exec, calls };
+}
+
+describe("pickFindTracksPrefilter", () => {
   test("prefers the longest text criterion", () => {
     expect(
-      pickTrackSearchSeed({
+      pickFindTracksPrefilter({
         nameQuery: "Paris",
         artist: "LB aka LABAT",
         album: "Feel So Good Around U",
+        yearMin: 2000,
       }),
-    ).toBe("Feel So Good Around U");
+    ).toEqual({ property: "album", operator: "_contains", value: "Feel So Good Around U" });
   });
 
-  test("returns undefined when no text criteria are present", () => {
-    expect(
-      pickTrackSearchSeed({
-        yearMin: 2020,
-        playCountMin: 5,
-      }),
-    ).toBeUndefined();
+  test("maps numeric bounds to inclusive comparisons", () => {
+    expect(pickFindTracksPrefilter({ yearMax: 2010 })).toEqual({
+      property: "year",
+      operator: "_lessThanEquals",
+      value: 2010,
+    });
+    expect(pickFindTracksPrefilter({ yearMin: 2000 })).toEqual({
+      property: "year",
+      operator: "_greaterThanEquals",
+      value: 2000,
+    });
+    expect(pickFindTracksPrefilter({ playCountMin: 5 })).toEqual({
+      property: "playedCount",
+      operator: "_greaterThanEquals",
+      value: 5,
+    });
+    expect(pickFindTracksPrefilter({ playCountMax: 3 })).toEqual({
+      property: "playedCount",
+      operator: "_lessThanEquals",
+      value: 3,
+    });
+  });
+
+  test("returns undefined when no criteria are present", () => {
+    expect(pickFindTracksPrefilter({})).toBeUndefined();
   });
 });
 
@@ -67,12 +139,9 @@ describe("matchesTrackCriteria", () => {
 });
 
 describe("createTrackOperations.findTracks", () => {
-  test("rejects missing and reversed criteria before invoking AppleScript", async () => {
-    let invocations = 0;
-    const operations = createTrackOperations(async () => {
-      invocations += 1;
-      return { stdout: '{"tracks":[],"scanned":0,"truncated":false}', stderr: "" };
-    });
+  test("rejects missing and reversed criteria before invoking a script", async () => {
+    const { exec, calls } = fakeMusicExec(trackColumns([]));
+    const operations = createTrackOperations(exec);
 
     await expect(operations.findTracks({})).rejects.toThrow(
       "At least one track filter is required.",
@@ -83,20 +152,36 @@ describe("createTrackOperations.findTracks", () => {
     await expect(operations.findTracks({ playCountMin: 10, playCountMax: 2 })).rejects.toThrow(
       "playCountMin must be less than or equal to playCountMax.",
     );
-    expect(invocations).toBe(0);
+    expect(calls).toHaveLength(0);
   });
 
-  test("uses the capped full-library path for numeric-only criteria", async () => {
-    let script = "";
-    const operations = createTrackOperations(async (generatedScript) => {
-      script = generatedScript;
-      return { stdout: '{"tracks":[],"scanned":0,"truncated":false}', stderr: "" };
-    });
+  test("asks Music for the text filter and reads matching rows column by column", async () => {
+    const tracks = [
+      { ...sampleTrack, id: "TRACK00000000001", name: "Love Lost", year: 2001, playCount: 1 },
+      { ...sampleTrack, id: "TRACK00000000002", name: "Glove", year: 2002, playCount: 9 },
+    ];
+    const { exec, calls } = fakeMusicExec(trackColumns(tracks));
+    const operations = createTrackOperations(exec);
 
-    const result = await operations.findTracks({ yearMin: 2000 });
-    expect(script).toContain("set sourceTracks to tracks of library playlist 1");
-    expect(script).toContain(`if scannedCount > ${FIND_TRACKS_CANDIDATE_CAP}`);
-    expect(script).toContain('if "" is not ""');
+    const result = await operations.findTracks({ nameQuery: "love", playCountMin: 0 });
+    expect(calls).toEqual([
+      { language: "JavaScript", whoseArgument: { name: { _contains: "love" } } },
+    ]);
+    expect(result).toEqual({
+      tracks: [tracks[1]!, tracks[0]!],
+      totalMatched: 2,
+      limit: 50,
+      scanned: 2,
+      truncated: false,
+    });
+  });
+
+  test("asks Music for a numeric bound when no text filter is present", async () => {
+    const { exec, calls } = fakeMusicExec(trackColumns([]));
+    const operations = createTrackOperations(exec);
+
+    const result = await operations.findTracks({ yearMin: 2000, yearMax: 2010 });
+    expect(calls[0]!.whoseArgument).toEqual({ year: { _lessThanEquals: 2010 } });
     expect(result).toEqual({
       tracks: [],
       totalMatched: 0,
@@ -106,34 +191,68 @@ describe("createTrackOperations.findTracks", () => {
     });
   });
 
-  test("filters, sorts, limits, and preserves a truncated 1,000-track window", async () => {
-    const tracks = Array.from({ length: FIND_TRACKS_CANDIDATE_CAP }, (_, index) => ({
-      ...sampleTrack,
-      id: `TRACK${index.toString().padStart(11, "0")}`,
-      name: `Track ${index}`,
-      playCount: index,
-    }));
-    const operations = createTrackOperations(async () => ({
-      stdout: JSON.stringify({
-        tracks,
-        scanned: FIND_TRACKS_CANDIDATE_CAP,
-        truncated: true,
-      }),
-      stderr: "",
-    }));
+  test("delivers hostile filter text to Music unchanged", async () => {
+    const { exec, calls } = fakeMusicExec(trackColumns([]));
+    const operations = createTrackOperations(exec);
+    const hostile = `a"b\\c\nd${String.fromCharCode(0x2028)}e\`); throw new Error("pwned"); (\``;
+
+    await operations.findTracks({ artist: hostile });
+    expect(calls[0]!.whoseArgument).toEqual({ artist: { _contains: hostile } });
+  });
+
+  test("applies the filters Music did not evaluate, then sorts and limits", async () => {
+    const tracks = [
+      { ...sampleTrack, id: "TRACK00000000001", artist: "Skeler", year: 1999, playCount: 5 },
+      { ...sampleTrack, id: "TRACK00000000002", artist: "Skeler", year: 2005, playCount: 3 },
+      { ...sampleTrack, id: "TRACK00000000003", artist: "Skeler", year: 2005, playCount: 8 },
+      { ...sampleTrack, id: "TRACK00000000004", artist: "Skeler", year: 2007, playCount: 6 },
+    ];
+    const { exec } = fakeMusicExec(trackColumns(tracks));
+    const operations = createTrackOperations(exec);
 
     const result = await operations.findTracks({
-      playCountMin: 997,
+      artist: "skeler",
+      yearMin: 2000,
       sortBy: "playCount",
       limit: 2,
     });
-    expect(result.tracks.map((track) => track.playCount)).toEqual([999, 998]);
+    expect(result.tracks.map((track) => track.id)).toEqual([
+      "TRACK00000000003",
+      "TRACK00000000004",
+    ]);
     expect(result.totalMatched).toBe(3);
-    expect(result.scanned).toBe(FIND_TRACKS_CANDIDATE_CAP);
-    expect(result.truncated).toBe(true);
+    expect(result.scanned).toBe(4);
+    expect(result.truncated).toBe(false);
   });
 
-  test("rejects schema-invalid AppleScript payloads", async () => {
+  test("stops reading at the safety cap and reports truncation", async () => {
+    const tracks = Array.from({ length: FIND_TRACKS_CANDIDATE_CAP + 3 }, (_, index) => ({
+      ...sampleTrack,
+      id: `TRACK${index.toString().padStart(11, "0")}`,
+      playCount: index,
+    }));
+    const { exec } = fakeMusicExec(trackColumns(tracks));
+    const operations = createTrackOperations(exec);
+
+    const result = await operations.findTracks({ playCountMin: 0, sortBy: "playCount", limit: 1 });
+    expect(result.scanned).toBe(FIND_TRACKS_CANDIDATE_CAP);
+    expect(result.truncated).toBe(true);
+    expect(result.totalMatched).toBe(FIND_TRACKS_CANDIDATE_CAP);
+    expect(result.tracks[0]!.playCount).toBe(FIND_TRACKS_CANDIDATE_CAP - 1);
+  });
+
+  test("fails when Music returns columns of different lengths", async () => {
+    const columns = trackColumns([sampleTrack, { ...sampleTrack, id: "TRACK00000000002" }]);
+    columns["year"] = [2024];
+    const { exec } = fakeMusicExec(columns);
+    const operations = createTrackOperations(exec);
+
+    await expect(operations.findTracks({ yearMin: 2000 })).rejects.toMatchObject({
+      code: "script_error",
+    });
+  });
+
+  test("rejects schema-invalid script payloads", async () => {
     const operations = createTrackOperations(async () => ({
       stdout: JSON.stringify({ tracks: "not-an-array", scanned: 1, truncated: false }),
       stderr: "",

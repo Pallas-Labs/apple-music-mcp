@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { escapeAppleScriptString } from "./escape.js";
+import { escapeAppleScriptString, toJavaScriptLiteral } from "./escape.js";
 
 describe("escapeAppleScriptString", () => {
   test("escapes backslashes", () => {
@@ -42,5 +42,19 @@ describe("escapeAppleScriptString", () => {
   test("escapes backslash before quote (order matters)", () => {
     // Input: \" should become \\\"
     expect(escapeAppleScriptString('\\"')).toBe('\\\\\\"');
+  });
+});
+
+describe("toJavaScriptLiteral", () => {
+  test("keeps quotes and backslashes inside the string literal", () => {
+    const literal = toJavaScriptLiteral({ name: { _contains: 'a"b\\c' } });
+    expect(new Function(`return ${literal};`)()).toEqual({ name: { _contains: 'a"b\\c' } });
+  });
+
+  test("escapes the U+2028 and U+2029 line terminators JSON.stringify leaves raw", () => {
+    const separators = String.fromCharCode(0x2028, 0x2029);
+    const literal = toJavaScriptLiteral(separators);
+    expect(literal).toBe('"\\u2028\\u2029"');
+    expect(new Function(`return ${literal};`)()).toBe(separators);
   });
 });
