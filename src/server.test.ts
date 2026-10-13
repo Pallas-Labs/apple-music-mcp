@@ -25,6 +25,7 @@ import {
   playTool,
   setPlayerTool,
   removeTracksFromPlaylistTool,
+  updateTrackTool,
 } from "./tools/index.js";
 
 const READ_ANNOTATIONS = {
@@ -72,6 +73,7 @@ const EXPECTED_ANNOTATIONS = {
   "music.get_playlist_tracks": READ_ANNOTATIONS,
   "music.add_tracks_to_playlist": ADDITIVE_ANNOTATIONS,
   "music.remove_tracks_from_playlist": DESTRUCTIVE_ANNOTATIONS,
+  "music.update_track": IDEMPOTENT_ANNOTATIONS,
 } as const;
 
 type TestClientOptions = {
@@ -396,6 +398,10 @@ describe("createServer", () => {
           },
         }),
         outputSchema: createPlaylistFromCriteriaTool.outputSchema,
+      },
+      {
+        payload: updateTrackTool.dryRunResult({ trackId: "AAAABBBBCCCCDDDD", disliked: true }),
+        outputSchema: updateTrackTool.outputSchema,
       },
     ];
 

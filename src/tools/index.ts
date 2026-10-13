@@ -10,6 +10,7 @@ import {
 import { movePlaylistTool } from "./move.js";
 import { deletePlaylistTool, renamePlaylistTool } from "./playlist-edits.js";
 import { getNowPlayingTool, playbackControlTool, playTool, setPlayerTool } from "./playback.js";
+import { updateTrackTool } from "./library.js";
 import { searchLibraryTool } from "./search.js";
 import {
   findTracksTool,
@@ -38,6 +39,7 @@ export {
   getPlaylistTracksTool,
   addTracksToPlaylistTool,
   removeTracksFromPlaylistTool,
+  updateTrackTool,
 };
 
 /** Every tool, in the order the server registers and lists them. */
@@ -61,4 +63,5 @@ export const allTools: readonly AnyToolDef[] = [
   getPlaylistTracksTool,
   addTracksToPlaylistTool,
   removeTracksFromPlaylistTool,
+  updateTrackTool,
 ];
