@@ -19,7 +19,7 @@ const SERVER_GUIDE = `# Apple Music MCP guide
 5. Set \`APPLE_MUSIC_MCP_DRY_RUN=true\` to preview write results without changing Music.
 6. Bulk AppleScript mutations are non-atomic and may partially succeed; inspect the returned ID lists.
 7. Each successful result is \`structuredContent\` that matches the tool's \`outputSchema\`.
-8. Errors set \`isError\` and return JSON text \`{"code": "...", "message": "..."}\`.
+8. Errors set \`isError\`. Errors raised by this server return JSON text \`{"code": "...", "message": "..."}\`; SDK input validation errors are plain text.
 9. Clients that run tools from code should chain read calls in one script and pass persistent IDs between tools.
 `;
 

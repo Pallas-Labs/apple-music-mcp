@@ -152,10 +152,7 @@ Add to `opencode.json`:
         "environment": {
           "APPLE_MUSIC_MCP_ENABLE_WRITES": "false"
         },
-        "protocol": "2026-07-28",
-        "timeout": {
-          "execution": 130000
-        }
+        "protocol": "2026-07-28"
       }
     }
   }
@@ -165,7 +162,6 @@ Add to `opencode.json`:
 OpenCode runs MCP servers in Code Mode by default, and this server works with it. Use the key
 `apple_music` with an underscore. Scripts then call tools such as
 `tools.apple_music.music_find_tracks(...)`, and prompts appear as `/apple_music:curate-playlist`.
-The 130-second execution timeout is just above the server's longest AppleScript limit.
 
 ### Hardened Read-Only (Codex)
 
