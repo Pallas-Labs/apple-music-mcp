@@ -9,6 +9,7 @@ import {
   defineTool,
   READ_ONLY_ANNOTATIONS,
 } from "../tool-contracts.js";
+import { readParentIds, readPlaylistEntries } from "./playlist-tree.js";
 
 const folderSchema = z.object({
   id: z.string().describe("Persistent folder ID."),
@@ -87,99 +88,19 @@ export const createFolderTool = defineTool({
 });
 
 async function listFolders(includeEmpty: boolean, execFn: ExecFn | undefined): Promise<Folder[]> {
-  const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 30 seconds
-            set folderRows to {}
-            repeat with f in every folder playlist
-                set folderId to persistent ID of f as text
-                set folderName to name of f as text
-                set parentFolderId to ""
-                try
-                    set parentFolderId to persistent ID of (parent of f) as text
-                on error
-                    set parentFolderId to ""
-                end try
-                set end of folderRows to {folderId, folderName, parentFolderId}
-            end repeat
-            return my jsonFolders(folderRows)
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try
-
-on jsonFolders(rows)
-    set json to "["
-    repeat with i from 1 to (count of rows)
-        set row to item i of rows
-        set fId to item 1 of row
-        set fName to item 2 of row
-        set pId to item 3 of row
-        set json to json & "{\\"id\\":\\"" & my jsonEscape(fId as text) & "\\",\\"name\\":\\"" & my jsonEscape(fName as text) & "\\",\\"parentId\\":\\"" & my jsonEscape(pId as text) & "\\"}"
-        if i < (count of rows) then
-            set json to json & ","
-        end if
-    end repeat
-    return json & "]"
-end jsonFolders`;
-
-  const result = await runAppleScript(buildScript(body), 40_000, execFn);
-  const folders = parseAppleScriptJson(
-    result.stdout,
-    z.array(folderRowSchema),
-    "Music returned an invalid folder payload.",
-  ).map(toFolder);
-
-  if (includeEmpty) {
-    return folders;
-  }
-
-  const nonEmptyIds = await listNonEmptyFolderIds(execFn);
-  return folders.filter((folder) => nonEmptyIds.has(folder.id));
-}
-
-async function listNonEmptyFolderIds(execFn: ExecFn | undefined): Promise<Set<string>> {
-  const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 30 seconds
-            set folderIds to {}
-            repeat with p in every user playlist
-                try
-                    set parentFolderId to persistent ID of (parent of p) as text
-                    if parentFolderId is not "" then
-                        set end of folderIds to parentFolderId
-                    end if
-                end try
-            end repeat
-            return my jsonIdList(folderIds)
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try
-
-on jsonIdList(rows)
-    set json to "["
-    repeat with i from 1 to (count of rows)
-        set rowValue to item i of rows
-        set json to json & "\\"" & my jsonEscape(rowValue as text) & "\\""
-        if i < (count of rows) then
-            set json to json & ","
-        end if
-    end repeat
-    return json & "]"
-end jsonIdList`;
-
-  const result = await runAppleScript(buildScript(body), 40_000, execFn);
-  const parsed = parseAppleScriptJson(
-    result.stdout,
-    z.array(z.string()),
-    "Music returned an invalid non-empty folder payload.",
+  const entries = await readPlaylistEntries(execFn);
+  const folders = entries.filter((entry) => entry.kind === "folder");
+  // A folder counts as empty when no user playlist sits directly inside it.
+  const parentIds = await readParentIds(
+    (includeEmpty ? folders : entries).map((entry) => entry.id),
+    execFn,
   );
-  return new Set(parsed.map((id) => id.trim()).filter((id) => id.length > 0));
+  const nonEmptyIds = new Set(
+    entries.flatMap((entry) => (entry.kind === "user" ? [parentIds.get(entry.id)] : [])),
+  );
+  return folders
+    .filter((folder) => includeEmpty || nonEmptyIds.has(folder.id))
+    .map((folder) => toFolder({ ...folder, parentId: parentIds.get(folder.id) ?? "" }));
 }
 
 async function createFolder(

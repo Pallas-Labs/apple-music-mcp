@@ -27,6 +27,10 @@
   large playlist no longer reads every entry. Removing many instances is still bound by Music's
   per-track delete.
 - `music.get_playlist_tracks` reads each page in bulk: a 100-track page went from 9.4 s to 0.4 s.
+- `music.list_playlists` and `music.list_folders` read playlist fields in bulk and read parent
+  folders in four parallel scripts. On 499 playlists and 59 folders, `music.list_playlists` went
+  from 42 s to 3.7 s, `music.list_folders` from 3.2 s to 1.0 s, and `includeEmpty: false` finishes
+  in 4.1 s instead of timing out.
 - `music.create_playlist_from_criteria` searches without holding the write lock, so other writes
   can proceed during the search.
 - Playback tools poll the player state instead of waiting a fixed delay.

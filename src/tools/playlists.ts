@@ -18,6 +18,7 @@ import {
   truncatedOutputSchema,
   type AddTracksResult,
 } from "./tracks.js";
+import { readParentIds, readPlaylistEntries } from "./playlist-tree.js";
 
 export const playlistSchema = z.object({
   id: z.string().describe("Persistent playlist ID."),
@@ -257,104 +258,17 @@ async function listPlaylists(
   input: { folderId?: string; includeRoot?: boolean },
   execFn: ExecFn | undefined,
 ): Promise<Playlist[]> {
-  const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 60 seconds
-            set playlistRows to {}
-            set allPlaylists to every user playlist
-            repeat with p in allPlaylists
-                try
-                    set playlistId to persistent ID of p as text
-                    set playlistName to name of p as text
-
-                    set parentFolderId to ""
-                    try
-                        set parentFolderId to persistent ID of (parent of p) as text
-                    on error
-                        set parentFolderId to ""
-                    end try
-
-                    set smartValue to "false"
-                    try
-                        if (special kind of p) is not none then
-                            set smartValue to "true"
-                        end if
-                    end try
-                    if smartValue is "false" then
-                        try
-                            if smart of p then
-                                set smartValue to "true"
-                            end if
-                        end try
-                    end if
-
-                    -- Avoid expensive per-playlist track counting in list operations.
-                    set trackCountValue to "-1"
-
-                    set end of playlistRows to {playlistId, playlistName, parentFolderId, smartValue, trackCountValue}
-                end try
-            end repeat
-
-            return my jsonPlaylists(playlistRows)
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try
-
-on jsonPlaylists(rows)
-    set json to "["
-    repeat with i from 1 to (count of rows)
-        set row to item i of rows
-        set playlistId to item 1 of row
-        set playlistName to item 2 of row
-        set parentFolderId to item 3 of row
-        set smartValue to item 4 of row
-        set trackCountValue to item 5 of row
-        set json to json & "{\\"id\\":\\"" & my jsonEscape(playlistId as text) & "\\",\\"name\\":\\"" & my jsonEscape(playlistName as text) & "\\",\\"folderId\\":\\"" & my jsonEscape(parentFolderId as text) & "\\",\\"isSmart\\":" & smartValue & ",\\"trackCount\\":" & trackCountValue & "}"
-        if i < (count of rows) then
-            set json to json & ","
-        end if
-    end repeat
-    return json & "]"
-end jsonPlaylists`;
-
-  const result = await runAppleScript(buildScript(body), 70_000, execFn);
-  const parsed = parseAppleScriptJson(
-    result.stdout,
-    z.array(playlistRowSchema),
-    "Music returned an invalid playlist payload.",
+  const playlists = (await readPlaylistEntries(execFn)).filter((entry) => entry.kind === "user");
+  const parentIds = await readParentIds(
+    playlists.map((playlist) => playlist.id),
+    execFn,
   );
-
-  // Deduplicate by persistent ID
-  const seen = new Set<string>();
-  const deduped = parsed.filter((p) => {
-    if (seen.has(p.id)) return false;
-    seen.add(p.id);
-    return true;
-  });
-
   const includeRoot = input.includeRoot ?? true;
-  const filtered = deduped.filter((playlist) => {
-    const parentId = playlist.folderId.trim();
-    if (input.folderId) return parentId === input.folderId;
-    if (!includeRoot) return parentId.length > 0;
-    return true;
-  });
-
-  return filtered.map((playlist) => {
-    const output: Playlist = {
-      id: playlist.id,
-      name: playlist.name,
-      isSmart: playlist.isSmart,
-    };
-    const folderId = playlist.folderId.trim();
-    if (folderId.length > 0) output.folderId = folderId;
-    if (playlist.trackCount >= 0) {
-      output.trackCount = playlist.trackCount;
-    }
-    return output;
+  return playlists.flatMap(({ id, name, isSmart }) => {
+    const folderId = parentIds.get(id) ?? "";
+    if (input.folderId !== undefined && folderId !== input.folderId) return [];
+    if (input.folderId === undefined && !includeRoot && folderId === "") return [];
+    return [{ id, name, isSmart, ...(folderId !== "" ? { folderId } : {}) }];
   });
 }
 
