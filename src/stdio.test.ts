@@ -30,10 +30,10 @@ describe("stdio entrypoint", () => {
         stderr: "ignore",
       });
       const client = new Client({ name: "apple-music-mcp-stdio-test", version: "1.0.0" }, options);
-      const startedAt = performance.now();
-      await client.connect(transport);
-      const connectMs = performance.now() - startedAt;
       try {
+        const startedAt = performance.now();
+        await client.connect(transport);
+        const connectMs = performance.now() - startedAt;
         expect(client.getProtocolEra()).toBe(era);
         expect(connectMs).toBeLessThan(5_000);
 

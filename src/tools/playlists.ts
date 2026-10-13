@@ -13,7 +13,9 @@ import {
 import {
   addTracksToPlaylist,
   findTracks,
+  scannedOutputSchema,
   trackCriteriaSchema,
+  truncatedOutputSchema,
   type AddTracksResult,
 } from "./tracks.js";
 
@@ -84,14 +86,8 @@ const createPlaylistFromCriteriaOutputSchema = z.object({
   failedTrackIds: z
     .array(z.string())
     .describe("IDs that were found in the library but could not be added to the playlist."),
-  scanned: z
-    .number()
-    .describe("Number of candidate tracks Music returned for the primary filter, at most 50,000."),
-  truncated: z
-    .boolean()
-    .describe(
-      "True when more than 50,000 candidates matched the primary filter, so matches may be missing.",
-    ),
+  scanned: scannedOutputSchema,
+  truncated: truncatedOutputSchema,
 });
 
 export const listPlaylistsTool = defineTool({

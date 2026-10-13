@@ -3,18 +3,32 @@ import { persistentIdSchema } from "../config.js";
 import { runAppleScript, runJavaScript } from "../applescript/runner.js";
 import type { ExecFn } from "../applescript/runner.js";
 import { escapeAppleScriptString, toJavaScriptLiteral } from "../applescript/escape.js";
+import { parseAppleScriptJson } from "../applescript/parse.js";
 import { buildJavaScript, buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { LibraryTrack, Track, TrackCriteria, TrackSortBy } from "../types.js";
 import {
   ADDITIVE_WRITE_ANNOTATIONS,
   defineTool,
+  DESTRUCTIVE_WRITE_ANNOTATIONS,
   READ_ONLY_ANNOTATIONS,
   type ToolSchemaOutput,
 } from "../tool-contracts.js";
 
 /** Cap on candidate rows returned from Music, bounding payload size and server memory. */
 export const FIND_TRACKS_CANDIDATE_CAP = 50_000;
+const CANDIDATE_CAP_TEXT = FIND_TRACKS_CANDIDATE_CAP.toLocaleString("en-US");
+
+export const scannedOutputSchema = z
+  .number()
+  .describe(
+    `Number of candidate tracks Music returned for the primary filter and that were examined, at most ${CANDIDATE_CAP_TEXT}.`,
+  );
+export const truncatedOutputSchema = z
+  .boolean()
+  .describe(
+    `True when more than ${CANDIDATE_CAP_TEXT} candidates matched the primary filter, so matches may be missing.`,
+  );
 
 /** Track property paired with the criteria field that substring-matches it. */
 const TEXT_FILTERS = [
@@ -38,12 +52,12 @@ function hasDuplicateTrackIds(trackIds: string[]): boolean {
   return toCanonicalTrackIdSet(trackIds).size !== trackIds.length;
 }
 
-const trackIdOutputSchema = z
+export const trackIdOutputSchema = z
   .string()
   .describe(
     "Persistent track ID for music.add_tracks_to_playlist and music.remove_tracks_from_playlist.",
   );
-const durationOutputSchema = z.number().describe("Track length in seconds.");
+export const durationOutputSchema = z.number().describe("Track length in seconds.");
 
 const libraryTrackSchema = z.object({
   id: trackIdOutputSchema,
@@ -157,16 +171,8 @@ const findTracksOutputSchema = z.object({
       "Number of scanned tracks that matched every filter. When truncated is true, this is a lower bound, not a full-library total.",
     ),
   limit: z.number().describe("The limit that was applied."),
-  scanned: z
-    .number()
-    .describe(
-      "Number of candidate tracks Music returned for the primary filter and that were examined, at most 50,000.",
-    ),
-  truncated: z
-    .boolean()
-    .describe(
-      "True when more than 50,000 candidates matched the primary filter, so matches may be missing.",
-    ),
+  scanned: scannedOutputSchema,
+  truncated: truncatedOutputSchema,
 });
 const getPlaylistTracksInputSchema = z.object({
   playlistId: persistentIdSchema.describe(
@@ -268,8 +274,7 @@ export type RemoveTracksResult = ToolSchemaOutput<typeof removeTracksOutputSchem
 
 export const findTracksTool = defineTool({
   name: "music.find_tracks",
-  description:
-    "Find library tracks by name, artist, album, genre, year, or play count across the whole library.\nRequires at least one filter. Up to 50,000 candidates are examined; when truncated is true, totalMatched is a lower bound.",
+  description: `Find library tracks by name, artist, album, genre, year, or play count across the whole library.\nRequires at least one filter. Up to ${CANDIDATE_CAP_TEXT} candidates are examined; when truncated is true, totalMatched is a lower bound.`,
   inputSchema: trackCriteriaSchema,
   outputSchema: findTracksOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
@@ -344,12 +349,7 @@ export const removeTracksFromPlaylistTool = defineTool({
     "Remove every instance of up to 100 unique tracks from a playlist and report per-ID outcomes.\nRequires APPLE_MUSIC_MCP_ENABLE_WRITES=true. Not atomic: check missingTrackIds and failedTrackIds.",
   inputSchema: trackMutationInputSchema,
   outputSchema: removeTracksOutputSchema,
-  annotations: {
-    readOnlyHint: false,
-    destructiveHint: true,
-    idempotentHint: true,
-    openWorldHint: false,
-  },
+  annotations: DESTRUCTIVE_WRITE_ANNOTATIONS,
   writesRequired: true,
   dryRunResult({ playlistId, trackIds }) {
     return {
@@ -425,7 +425,7 @@ JSON.stringify({ tracks, scanned: tracks.length, truncated: candidateCount > tra
 
   const result = await runJavaScript(buildJavaScript(body), 120_000, execFn);
 
-  const parsed = parseAppleScriptJsonOutput(
+  const parsed = parseAppleScriptJson(
     result.stdout,
     findTracksScriptResultSchema,
     "Music returned an invalid find tracks payload.",
@@ -503,7 +503,7 @@ end jsonTracks`;
 
   const result = await runAppleScript(buildScript(body), 60_000);
 
-  const parsed = parseAppleScriptJsonOutput(
+  const parsed = parseAppleScriptJson(
     result.stdout,
     playlistTracksResultSchema,
     "Music returned an invalid playlist tracks payload.",
@@ -553,7 +553,7 @@ end try`;
 
   const result = await runAppleScript(buildScript(body), 60_000, execFn);
 
-  const parsed = parseAppleScriptJsonOutput(
+  const parsed = parseAppleScriptJson(
     result.stdout,
     addTracksResultSchema,
     "Music returned an invalid add tracks payload.",
@@ -625,27 +625,13 @@ end try`;
 
   const result = await runAppleScript(buildScript(body), 60_000, execFn);
 
-  const parsed = parseAppleScriptJsonOutput(
+  const parsed = parseAppleScriptJson(
     result.stdout,
     removeTracksResultSchema,
     "Music returned an invalid remove tracks payload.",
   );
   validateRemoveTracksResult(parsed, playlistId, trackIds);
   return parsed;
-}
-
-function parseAppleScriptJsonOutput<Schema extends z.ZodType>(
-  stdout: string,
-  schema: Schema,
-  invalidPayloadMessage: string,
-): z.output<Schema> {
-  try {
-    return schema.parse(JSON.parse(stdout));
-  } catch {
-    throw new MusicToolError("script_error", invalidPayloadMessage, {
-      outputLength: stdout.length,
-    });
-  }
 }
 
 function validateTrackMutationClassifications(

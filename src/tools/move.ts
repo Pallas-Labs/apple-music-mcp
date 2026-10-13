@@ -5,7 +5,7 @@ import { escapeAppleScriptString } from "../applescript/escape.js";
 import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { Playlist } from "../types.js";
-import { defineTool } from "../tool-contracts.js";
+import { defineTool, IDEMPOTENT_WRITE_ANNOTATIONS } from "../tool-contracts.js";
 
 const movePlaylistInputSchema = z.object({
   playlistId: persistentIdSchema.describe(
@@ -33,12 +33,7 @@ export const movePlaylistTool = defineTool({
   description: "Move a user playlist into a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
   inputSchema: movePlaylistInputSchema,
   outputSchema: movePlaylistOutputSchema,
-  annotations: {
-    readOnlyHint: false,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: false,
-  },
+  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
   writesRequired: true,
   dryRunResult({ playlistId, targetFolderId }) {
     return {

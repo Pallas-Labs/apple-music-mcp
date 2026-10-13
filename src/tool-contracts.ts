@@ -25,6 +25,13 @@ export const IDEMPOTENT_WRITE_ANNOTATIONS = Object.freeze({
   openWorldHint: false,
 } satisfies ToolAnnotations);
 
+export const DESTRUCTIVE_WRITE_ANNOTATIONS = Object.freeze({
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+} satisfies ToolAnnotations);
+
 export type ToolSchema = StandardSchemaWithJSON;
 
 export type ToolSchemaOutput<S extends ToolSchema> = StandardSchemaWithJSON.InferOutput<S>;

@@ -7,7 +7,11 @@ import { runAppleScript } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { Playlist } from "../types.js";
-import { defineTool, IDEMPOTENT_WRITE_ANNOTATIONS } from "../tool-contracts.js";
+import {
+  defineTool,
+  DESTRUCTIVE_WRITE_ANNOTATIONS,
+  IDEMPOTENT_WRITE_ANNOTATIONS,
+} from "../tool-contracts.js";
 import { playlistSchema } from "./playlists.js";
 
 const PLAYLIST_KINDS = ["user", "folder", "subscription", "system"] as const;
@@ -250,32 +254,37 @@ export function createDeletePlaylistTool(
       "Delete a user playlist after the user confirms. Folders are refused. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.\nClients that support elicitation always show a confirmation prompt; other clients must pass confirm: true.",
     inputSchema: deletePlaylistInputSchema,
     outputSchema: deletePlaylistOutputSchema,
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
+    annotations: DESTRUCTIVE_WRITE_ANNOTATIONS,
     writesRequired: true,
     dryRunResult({ playlistId }) {
       return { deletedPlaylistId: playlistId, name: "DRY_RUN_PLAYLIST" };
     },
     async handler({ playlistId, confirm }, { canElicit, inputResponses }) {
-      const playlist = await operations.describe(playlistId);
-      assertEditable(playlist, "delete");
-      const summary = `"${playlist.name}" (${describeTracks(playlist.trackCount)})`;
+      const confirmationPending = canElicit
+        ? inputResponse(inputResponses, DELETE_CONFIRMATION_KEY).kind === "missing"
+        : confirm !== true;
+
+      if (confirmationPending) {
+        const playlist = await operations.describe(playlistId);
+        assertEditable(playlist, "delete");
+        const summary = `"${playlist.name}" (${describeTracks(playlist.trackCount)})`;
+        if (!canElicit) {
+          throw new MusicToolError(
+            "validation_error",
+            `This client cannot show a confirmation prompt. Ask the user to approve deleting ${summary}, then call again with confirm: true.`,
+          );
+        }
+        return inputRequired({
+          inputRequests: {
+            [DELETE_CONFIRMATION_KEY]: inputRequired.elicit({
+              message: `Delete the playlist ${summary}? Its tracks stay in your library. This cannot be undone.`,
+              requestedSchema: deleteConfirmationSchema,
+            }),
+          },
+        });
+      }
 
       if (canElicit) {
-        if (inputResponse(inputResponses, DELETE_CONFIRMATION_KEY).kind === "missing") {
-          return inputRequired({
-            inputRequests: {
-              [DELETE_CONFIRMATION_KEY]: inputRequired.elicit({
-                message: `Delete the playlist ${summary}? Its tracks stay in your library. This cannot be undone.`,
-                requestedSchema: deleteConfirmationSchema,
-              }),
-            },
-          });
-        }
         const answer = acceptedContent(
           inputResponses,
           DELETE_CONFIRMATION_KEY,
@@ -284,11 +293,6 @@ export function createDeletePlaylistTool(
         if (answer?.confirm !== true) {
           throw new MusicToolError("validation_error", "Deletion cancelled. Nothing was deleted.");
         }
-      } else if (confirm !== true) {
-        throw new MusicToolError(
-          "validation_error",
-          `This client cannot show a confirmation prompt. Ask the user to approve deleting ${summary}, then call again with confirm: true.`,
-        );
       }
 
       const deleted = await operations.delete(playlistId);

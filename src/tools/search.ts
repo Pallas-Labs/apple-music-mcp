@@ -5,6 +5,7 @@ import { buildScript } from "../applescript/templates.js";
 import { MusicToolError } from "../types.js";
 import type { Track } from "../types.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
+import { durationOutputSchema, trackIdOutputSchema } from "./tracks.js";
 
 const searchLibraryInputSchema = z.object({
   query: z
@@ -18,15 +19,11 @@ const searchLibraryInputSchema = z.object({
 const searchLibraryOutputSchema = z.object({
   tracks: z.array(
     z.object({
-      id: z
-        .string()
-        .describe(
-          "Persistent track ID for music.add_tracks_to_playlist and music.remove_tracks_from_playlist.",
-        ),
+      id: trackIdOutputSchema,
       name: z.string(),
       artist: z.string(),
       album: z.string(),
-      duration: z.number().describe("Track length in seconds."),
+      duration: durationOutputSchema,
     }),
   ),
 });

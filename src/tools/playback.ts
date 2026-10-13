@@ -14,6 +14,8 @@ import {
   type ToolSchemaOutput,
 } from "../tool-contracts.js";
 
+const playerStateSchema = z.enum(["playing", "paused", "stopped"]);
+
 const getNowPlayingInputSchema = z.object({});
 const getNowPlayingOutputSchema = z.object({
   name: z.string().describe("Track name. Empty when stopped."),
@@ -21,7 +23,7 @@ const getNowPlayingOutputSchema = z.object({
   album: z.string().describe("Track album. Empty when stopped."),
   duration: z.number().describe("Track length in seconds. 0 when stopped."),
   position: z.number().describe("Playback position in seconds. 0 when stopped."),
-  playerState: z.enum(["playing", "paused", "stopped"]),
+  playerState: playerStateSchema,
 });
 const playbackControlInputSchema = z.object({
   action: z
@@ -33,12 +35,9 @@ const playbackControlInputSchema = z.object({
 const playbackControlOutputSchema = z.object({
   success: z.boolean(),
   action: z.string().describe("The action that ran."),
-  playerState: z
-    .enum(["playing", "paused", "stopped"])
-    .describe("Player state shortly after the action ran."),
+  playerState: playerStateSchema.describe("Player state shortly after the action ran."),
 });
 
-const playerStateSchema = z.enum(["playing", "paused", "stopped"]);
 const repeatModeSchema = z.enum(["off", "one", "all"]);
 
 const playInputSchema = z
@@ -382,10 +381,12 @@ end replaceText
   return parsed;
 }
 
+type PlaybackAction = z.infer<typeof playbackControlInputSchema>["action"];
+
 async function controlPlayback(
-  action: "play" | "pause" | "next" | "previous" | "toggle",
+  action: PlaybackAction,
 ): Promise<{ success: boolean; action: string; playerState: "playing" | "paused" | "stopped" }> {
-  const actionMap: Record<string, string> = {
+  const actionMap: Record<PlaybackAction, string> = {
     play: "play",
     pause: "pause",
     next: "next track",
@@ -393,7 +394,7 @@ async function controlPlayback(
     toggle: "playpause",
   };
 
-  const asAction = actionMap[action] ?? "playpause";
+  const asAction = actionMap[action];
 
   const script = buildScript(`
 try
