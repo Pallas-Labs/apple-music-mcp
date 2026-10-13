@@ -72,10 +72,10 @@ It also provides two user-invoked prompts:
 
 ## Environment Variables
 
-| Variable                        | Default | Description                                                       |
-| ------------------------------- | ------- | ----------------------------------------------------------------- |
-| `APPLE_MUSIC_MCP_ENABLE_WRITES` | `false` | Enable mutation tools (create, move, playback, add/remove tracks) |
-| `APPLE_MUSIC_MCP_DRY_RUN`       | `false` | Mutation tools return dry-run payloads without modifying Music    |
+| Variable                        | Default | Description                                                    |
+| ------------------------------- | ------- | -------------------------------------------------------------- |
+| `APPLE_MUSIC_MCP_ENABLE_WRITES` | `false` | Enable every Write tool in the table above                     |
+| `APPLE_MUSIC_MCP_DRY_RUN`       | `false` | Mutation tools return dry-run payloads without modifying Music |
 
 ## Setup (Recommended)
 

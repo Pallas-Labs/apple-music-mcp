@@ -1,6 +1,6 @@
 {
   "name": "@pallas-labs/apple-music-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "MCP server for controlling Apple Music on macOS via AppleScript",
   "keywords": [
     "apple-music",
