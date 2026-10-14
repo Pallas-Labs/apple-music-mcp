@@ -1,9 +1,11 @@
-export function log(event: string, data: Record<string, unknown>): void {
+import type { DiagnosticData } from "./types.js";
+
+export const log = (event: string, data: DiagnosticData): void => {
   console.error(
     JSON.stringify({
-      ts: new Date().toISOString(),
       event,
+      ts: new Date().toISOString(),
       ...data,
-    }),
+    })
   );
-}
+};

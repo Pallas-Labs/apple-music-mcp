@@ -1,11 +1,11 @@
 import * as z from "zod/v4";
-import { SERVER_VERSION, runtimeConfig } from "../config.js";
-import { runAppleScript } from "../applescript/runner.js";
-import { MusicToolError } from "../types.js";
-import type { MusicHealth } from "../types.js";
-import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
 
-async function isMusicRunning(): Promise<boolean> {
+import { runAppleScript } from "../applescript/runner.js";
+import { SERVER_VERSION } from "../config.js";
+import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
+import { MusicToolError } from "../types.js";
+
+const isMusicRunning = async (): Promise<boolean> => {
   const script = `
 try
     if application "Music" is running then
@@ -17,11 +17,11 @@ on error
     return "not_running"
 end try
 `;
-  const result = await runAppleScript(script, 2_000);
+  const result = await runAppleScript(script, 2000);
   return result.stdout === "running";
-}
+};
 
-async function checkMusicPermission(): Promise<boolean> {
+const checkMusicPermission = async (): Promise<boolean> => {
   const script = `
 try
     tell application "Music" to launch
@@ -30,22 +30,27 @@ on error errMsg number errNum
     return "error:" & errNum
 end try
 `;
-  const result = await runAppleScript(script, 5_000);
-  if (!result.stdout.startsWith("error:")) return true;
+  const result = await runAppleScript(script, 5000);
+  if (!result.stdout.startsWith("error:")) {
+    return true;
+  }
 
   const errorNumber = Number(result.stdout.replace("error:", ""));
-  if (errorNumber === -1743 || errorNumber === -10004) return false;
+  if (errorNumber === -1743 || errorNumber === -10_004) {
+    return false;
+  }
   if (
     errorNumber === -600 ||
-    errorNumber === -10810 ||
+    errorNumber === -10_810 ||
     errorNumber === -1728 ||
     errorNumber === -43
-  )
+  ) {
     return false;
+  }
   return true;
-}
+};
 
-async function getMusicHealth(): Promise<MusicHealth> {
+const getMusicHealth = async () => {
   const musicRunning = await isMusicRunning();
   let permissionGranted = false;
 
@@ -53,40 +58,61 @@ async function getMusicHealth(): Promise<MusicHealth> {
     try {
       permissionGranted = await checkMusicPermission();
     } catch (error) {
-      if (!(error instanceof MusicToolError)) throw error;
-      if (error.code !== "permission_denied" && error.code !== "music_not_running") throw error;
+      if (!(error instanceof MusicToolError)) {
+        throw error;
+      }
+      if (
+        error.code !== "permission_denied" &&
+        error.code !== "music_not_running"
+      ) {
+        throw error;
+      }
     }
   }
 
   return { musicRunning, permissionGranted, serverVersion: SERVER_VERSION };
-}
+};
 
 const healthInputSchema = z.object({});
 const healthOutputSchema = z.object({
+  dryRun: z
+    .boolean()
+    .describe(
+      "True when mutation tools return previews without changing Music."
+    ),
   musicRunning: z.boolean(),
-  permissionGranted: z.boolean(),
+  permissionGranted: z
+    .boolean()
+    .describe(
+      "True when macOS lets this process automate Music. Always false if Music is not running."
+    ),
   serverVersion: z.string(),
-  writesEnabled: z.boolean(),
-  dryRun: z.boolean(),
+  writesEnabled: z
+    .boolean()
+    .describe("True when mutation tools may change Apple Music."),
 });
 
 export const healthTool = defineTool({
-  name: "music.health",
-  description: "Check Apple Music availability and automation permission status.",
-  inputSchema: healthInputSchema,
-  outputSchema: healthOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
-  writesRequired: false,
-  async handler() {
+  description:
+    "Check that Apple Music is running and that automation permission is granted. Call this first.",
+  async handler(_input, { config }) {
     const health = await getMusicHealth();
     const response = {
       ...health,
-      writesEnabled: runtimeConfig.writesEnabled,
-      dryRun: runtimeConfig.dryRun,
+      dryRun: config.dryRun,
+      writesEnabled: config.writesEnabled,
     };
     return {
+      logData: {
+        musicRunning: health.musicRunning,
+        permissionGranted: health.permissionGranted,
+      },
       structuredContent: response,
-      logData: { musicRunning: health.musicRunning, permissionGranted: health.permissionGranted },
     };
   },
+  inputSchema: healthInputSchema,
+  name: "music.health",
+  outputSchema: healthOutputSchema,
+  writesRequired: false,
 });

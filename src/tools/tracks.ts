@@ -1,57 +1,88 @@
 import * as z from "zod/v4";
+
+import { toJavaScriptLiteral } from "../applescript/escape.js";
+import { parseAppleScriptJson } from "../applescript/parse.js";
+import { runJavaScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
+import { buildJavaScript } from "../applescript/templates.js";
 import { persistentIdSchema } from "../config.js";
-import { runAppleScript } from "../applescript/runner.js";
-import { escapeAppleScriptString } from "../applescript/escape.js";
-import { buildScript } from "../applescript/templates.js";
-import { MusicToolError } from "../types.js";
-import type { LibraryTrack, Track, TrackCriteria, TrackSortBy } from "../types.js";
 import {
   ADDITIVE_WRITE_ANNOTATIONS,
   defineTool,
+  DESTRUCTIVE_WRITE_ANNOTATIONS,
   READ_ONLY_ANNOTATIONS,
-  type ToolSchemaOutput,
 } from "../tool-contracts.js";
+import type { ToolSchemaOutput } from "../tool-contracts.js";
+import { MusicToolError } from "../types.js";
+import type {
+  LibraryTrack,
+  Track,
+  TrackCriteria,
+  TrackSortBy,
+} from "../types.js";
 
-export const FIND_TRACKS_CANDIDATE_CAP = 1_000;
+/** Cap on candidate rows returned from Music, bounding payload size and server memory. */
+export const FIND_TRACKS_CANDIDATE_CAP = 50_000;
+const CANDIDATE_CAP_TEXT = FIND_TRACKS_CANDIDATE_CAP.toLocaleString("en-US");
 
-function canonicalTrackId(trackId: string): string {
-  return trackId.toUpperCase();
-}
+export const scannedOutputSchema = z
+  .number()
+  .describe(
+    `Number of candidate tracks Music returned for the primary filter and that were examined, at most ${CANDIDATE_CAP_TEXT}.`
+  );
+export const truncatedOutputSchema = z
+  .boolean()
+  .describe(
+    `True when more than ${CANDIDATE_CAP_TEXT} candidates matched the primary filter, so matches may be missing.`
+  );
 
-function toCanonicalTrackIdSet(trackIds: string[]): Set<string> {
-  return new Set(trackIds.map(canonicalTrackId));
-}
+/** Track property paired with the criteria field that substring-matches it. */
+const TEXT_FILTERS = [
+  ["name", "nameQuery"],
+  ["artist", "artist"],
+  ["album", "album"],
+  ["genre", "genre"],
+] as const;
 
-function hasDuplicateTrackIds(trackIds: string[]): boolean {
-  return toCanonicalTrackIdSet(trackIds).size !== trackIds.length;
-}
+const textCollator = new Intl.Collator("en", { sensitivity: "base" });
+
+/**
+ * JXA that binds `playlist` from a `playlistId` constant. Music re-evaluates a whose-based
+ * specifier on every command that names it (350 ms per duplicate against 500 playlists), so
+ * commands address the playlist by database ID instead. Reading `.id()` on an empty whose
+ * result throws -1728, which the runner maps to not_found.
+ */
+const PIN_USER_PLAYLIST = `const playlist = music.userPlaylists.byId(music.userPlaylists.whose({persistentID: playlistId})[0].id());`;
+
+const canonicalTrackId = (trackId: string): string => trackId.toUpperCase();
+
+const toCanonicalTrackIdSet = (trackIds: string[]): Set<string> =>
+  new Set(trackIds.map(canonicalTrackId));
+
+const hasDuplicateTrackIds = (trackIds: string[]): boolean =>
+  toCanonicalTrackIdSet(trackIds).size !== trackIds.length;
+
+export const trackIdOutputSchema = z
+  .string()
+  .describe(
+    "Persistent track ID for music.add_tracks_to_playlist and music.remove_tracks_from_playlist."
+  );
+export const durationOutputSchema = z
+  .number()
+  .describe("Track length in seconds.");
 
 const libraryTrackSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  artist: z.string(),
   album: z.string(),
+  artist: z.string(),
+  duration: durationOutputSchema,
   genre: z.string(),
-  duration: z.number(),
-  year: z.number(),
-  playCount: z.number(),
+  id: trackIdOutputSchema,
+  name: z.string(),
+  playCount: z.number().describe("Number of times the track was played."),
+  year: z.number().describe("Release year. 0 when unknown."),
 });
 
-export const trackCriteriaShape = {
-  nameQuery: z
-    .string()
-    .trim()
-    .min(1)
-    .max(255)
-    .optional()
-    .describe("Case-insensitive substring match against track name."),
-  artist: z
-    .string()
-    .trim()
-    .min(1)
-    .max(255)
-    .optional()
-    .describe("Case-insensitive substring match against artist."),
+export const trackCriteriaFields = {
   album: z
     .string()
     .trim()
@@ -59,6 +90,13 @@ export const trackCriteriaShape = {
     .max(255)
     .optional()
     .describe("Case-insensitive substring match against album."),
+  artist: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe("Case-insensitive substring match against artist."),
   genre: z
     .string()
     .trim()
@@ -66,81 +104,144 @@ export const trackCriteriaShape = {
     .max(255)
     .optional()
     .describe("Case-insensitive substring match against genre."),
-  yearMin: z.number().int().min(0).max(9999).optional(),
-  yearMax: z.number().int().min(0).max(9999).optional(),
-  playCountMin: z.number().int().min(0).optional(),
-  playCountMax: z.number().int().min(0).optional(),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Maximum tracks to return, 1-200 (default 50)."),
+  nameQuery: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe("Case-insensitive substring match against track name."),
+  playCountMax: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("Maximum play count, inclusive."),
+  playCountMin: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("Minimum play count, inclusive."),
   sortBy: z
     .enum(["name", "artist", "album", "year", "playCount"])
     .optional()
-    .describe("Sort order for returned tracks."),
-  limit: z.number().int().min(1).max(200).optional().describe("Max tracks to return (default 50)."),
-} satisfies z.ZodRawShape;
+    .describe(
+      "Sort order (default name). name, artist, and album sort A to Z; year and playCount sort highest first."
+    ),
+  yearMax: z
+    .number()
+    .int()
+    .min(0)
+    .max(9999)
+    .optional()
+    .describe("Latest release year, inclusive."),
+  yearMin: z
+    .number()
+    .int()
+    .min(0)
+    .max(9999)
+    .optional()
+    .describe(
+      "Earliest release year, inclusive. Tracks with no year have year 0."
+    ),
+};
 
-export const trackCriteriaSchema = z.object(trackCriteriaShape).superRefine((criteria, context) => {
-  const hasTextFilter = [criteria.nameQuery, criteria.artist, criteria.album, criteria.genre].some(
-    (value) => value !== undefined && value.trim().length > 0,
-  );
-  const hasNumericFilter = [
-    criteria.yearMin,
-    criteria.yearMax,
-    criteria.playCountMin,
-    criteria.playCountMax,
-  ].some((value) => value !== undefined);
+export const trackCriteriaSchema = z
+  .object(trackCriteriaFields)
+  .superRefine((criteria, context) => {
+    const hasTextFilter = [
+      criteria.nameQuery,
+      criteria.artist,
+      criteria.album,
+      criteria.genre,
+    ].some((value) => value !== undefined && value.trim().length > 0);
+    const hasNumericFilter = [
+      criteria.yearMin,
+      criteria.yearMax,
+      criteria.playCountMin,
+      criteria.playCountMax,
+    ].some((value) => value !== undefined);
 
-  if (!hasTextFilter && !hasNumericFilter) {
-    context.addIssue({
-      code: "custom",
-      message: "At least one track filter is required.",
-    });
-  }
-  if (
-    criteria.yearMin !== undefined &&
-    criteria.yearMax !== undefined &&
-    criteria.yearMin > criteria.yearMax
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "yearMin must be less than or equal to yearMax.",
-    });
-  }
-  if (
-    criteria.playCountMin !== undefined &&
-    criteria.playCountMax !== undefined &&
-    criteria.playCountMin > criteria.playCountMax
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "playCountMin must be less than or equal to playCountMax.",
-    });
-  }
-});
+    if (!hasTextFilter && !hasNumericFilter) {
+      context.addIssue({
+        code: "custom",
+        message: "At least one track filter is required.",
+      });
+    }
+    if (
+      criteria.yearMin !== undefined &&
+      criteria.yearMax !== undefined &&
+      criteria.yearMin > criteria.yearMax
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "yearMin must be less than or equal to yearMax.",
+      });
+    }
+    if (
+      criteria.playCountMin !== undefined &&
+      criteria.playCountMax !== undefined &&
+      criteria.playCountMin > criteria.playCountMax
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "playCountMin must be less than or equal to playCountMax.",
+      });
+    }
+  });
 
 const findTracksOutputSchema = z.object({
-  tracks: z.array(libraryTrackSchema),
-  totalMatched: z.number(),
-  limit: z.number(),
-  scanned: z.number(),
-  truncated: z.boolean(),
+  limit: z.number().describe("The limit that was applied."),
+  scanned: scannedOutputSchema,
+  totalMatched: z
+    .number()
+    .describe(
+      "Number of scanned tracks that matched every filter. When truncated is true, this is a lower bound, not a full-library total."
+    ),
+  tracks: z
+    .array(libraryTrackSchema)
+    .describe("Matching tracks after sorting, at most limit."),
+  truncated: truncatedOutputSchema,
 });
 const getPlaylistTracksInputSchema = z.object({
-  playlistId: persistentIdSchema,
-  offset: z.number().int().min(0).optional().describe("Start index (default 0)."),
-  limit: z.number().int().min(1).max(100).optional().describe("Max tracks to return (default 50)."),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe("Maximum tracks to return, 1-100 (default 50)."),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("Zero-based index of the first track to return (default 0)."),
+  playlistId: persistentIdSchema.describe(
+    "Persistent playlist ID from music.list_playlists or music.create_playlist."
+  ),
 });
 const getPlaylistTracksOutputSchema = z.object({
+  limit: z.number().describe("The limit that was applied."),
+  offset: z.number().describe("The offset that was applied."),
+  total: z.number().describe("Number of tracks in the whole playlist."),
   tracks: z.array(
     z.object({
-      id: z.string(),
-      name: z.string(),
-      artist: z.string(),
       album: z.string(),
-      duration: z.number(),
-    }),
+      artist: z.string(),
+      duration: durationOutputSchema,
+      id: trackIdOutputSchema,
+      name: z.string(),
+    })
   ),
-  total: z.number(),
-  offset: z.number(),
-  limit: z.number(),
 });
 export const trackIdsSchema = z
   .array(persistentIdSchema)
@@ -149,453 +250,281 @@ export const trackIdsSchema = z
   .refine((trackIds) => !hasDuplicateTrackIds(trackIds), {
     message: "Track IDs must be unique.",
   })
-  .describe("Unique persistent IDs of tracks.");
+  .describe(
+    "1-100 unique persistent track IDs from music.find_tracks, music.search_library, or music.get_playlist_tracks."
+  );
 const trackMutationInputSchema = z.object({
-  playlistId: persistentIdSchema,
+  playlistId: persistentIdSchema.describe(
+    "Persistent playlist ID from music.list_playlists or music.create_playlist."
+  ),
   trackIds: trackIdsSchema,
 });
+const requestedOutputSchema = z
+  .number()
+  .int()
+  .min(0)
+  .describe("Number of track IDs in the request.");
 const addTracksOutputSchema = z.object({
+  added: z
+    .number()
+    .int()
+    .min(0)
+    .describe("Number of tracks added. Equals addedTrackIds.length."),
+  addedTrackIds: z
+    .array(z.string())
+    .describe("Requested IDs that were added to the playlist."),
+  failedTrackIds: z
+    .array(z.string())
+    .describe(
+      "Requested IDs that were found in the library but could not be added."
+    ),
+  missingTrackIds: z
+    .array(z.string())
+    .describe("Requested IDs that were not found in the library."),
   playlistId: z.string(),
-  requested: z.number().int().min(0),
-  added: z.number().int().min(0),
-  addedTrackIds: z.array(z.string()),
-  missingTrackIds: z.array(z.string()),
-  failedTrackIds: z.array(z.string()),
+  requested: requestedOutputSchema,
 });
 const removeTracksOutputSchema = z.object({
+  failedTrackIds: z
+    .array(z.string())
+    .describe(
+      "Requested IDs with at least one instance that could not be removed. Can overlap removedTrackIds."
+    ),
+  missingTrackIds: z
+    .array(z.string())
+    .describe("Requested IDs with no instance in the playlist."),
   playlistId: z.string(),
-  requested: z.number().int().min(0),
-  removed: z.number().int().min(0),
-  removedTrackIds: z.array(z.string()),
-  missingTrackIds: z.array(z.string()),
-  failedTrackIds: z.array(z.string()),
+  removed: z
+    .number()
+    .int()
+    .min(0)
+    .describe(
+      "Number of playlist entries deleted. Can exceed removedTrackIds.length when a track appears more than once."
+    ),
+  removedTrackIds: z
+    .array(z.string())
+    .describe("Requested IDs with at least one playlist instance removed."),
+  requested: requestedOutputSchema,
 });
 const addTracksResultSchema = addTracksOutputSchema;
 const removeTracksResultSchema = removeTracksOutputSchema;
-const findTracksScriptResultSchema = z.object({
-  tracks: z.array(libraryTrackSchema),
-  scanned: z.number().int().min(0),
-  truncated: z.boolean(),
-});
+const findTracksPageSchema = z.array(libraryTrackSchema);
+
+const stringColumnSchema = z.array(z.string());
+const numberColumnSchema = z.array(z.number());
+
+/**
+ * The find_tracks payload, one array per track property. Up to 50,000 candidates arrive per
+ * call, so rows are not built or checked against libraryTrackSchema until after filtering and
+ * the limit cut.
+ */
+const findTracksPayloadSchema = z
+  .object({
+    columns: z.object({
+      albums: stringColumnSchema,
+      artists: stringColumnSchema,
+      durations: numberColumnSchema,
+      genres: stringColumnSchema,
+      ids: stringColumnSchema,
+      names: stringColumnSchema,
+      playCounts: numberColumnSchema,
+      years: numberColumnSchema,
+    }),
+    scanned: z.number().int().min(0),
+    truncated: z.boolean(),
+  })
+  .refine(({ columns, scanned }) =>
+    Object.values(columns).every((column) => column.length === scanned)
+  );
+type TrackColumns = z.output<typeof findTracksPayloadSchema>["columns"];
 const playlistTracksResultSchema = getPlaylistTracksOutputSchema;
+
+const INVALID_FIND_TRACKS_PAYLOAD =
+  "Music returned an invalid find tracks payload.";
 
 export type FindTracksResult = ToolSchemaOutput<typeof findTracksOutputSchema>;
 export type AddTracksResult = ToolSchemaOutput<typeof addTracksOutputSchema>;
-export type RemoveTracksResult = ToolSchemaOutput<typeof removeTracksOutputSchema>;
+export type RemoveTracksResult = ToolSchemaOutput<
+  typeof removeTracksOutputSchema
+>;
 
-export const findTracksTool = defineTool({
-  name: "music.find_tracks",
-  description:
-    "Find library tracks by explicit criteria such as name, artist, album, genre, year, and play count.",
-  inputSchema: trackCriteriaSchema,
-  outputSchema: findTracksOutputSchema,
-  annotations: READ_ONLY_ANNOTATIONS,
-  writesRequired: false,
-  async handler(criteria) {
-    const result = await findTracks(criteria);
-    return {
-      structuredContent: result,
-      logData: {
-        totalMatched: result.totalMatched,
-        returnedCount: result.tracks.length,
-        scanned: result.scanned,
-        truncated: result.truncated,
-        sortBy: criteria.sortBy ?? "name",
-      },
+export type FindTracksPrefilter =
+  | {
+      property: "name" | "artist" | "album" | "genre";
+      operator: "_contains";
+      value: string;
+    }
+  | {
+      property: "year" | "playedCount";
+      operator: "_greaterThanEquals" | "_lessThanEquals";
+      value: number;
     };
-  },
-});
 
-export const getPlaylistTracksTool = defineTool({
-  name: "music.get_playlist_tracks",
-  description: "Get tracks in a playlist. Supports pagination via offset/limit.",
-  inputSchema: getPlaylistTracksInputSchema,
-  outputSchema: getPlaylistTracksOutputSchema,
-  annotations: READ_ONLY_ANNOTATIONS,
-  writesRequired: false,
-  async handler({ playlistId, offset, limit }) {
-    const result = await getPlaylistTracks(playlistId, offset ?? 0, limit ?? 50);
+const compareText = (left: string, right: string): number =>
+  textCollator.compare(left, right);
+
+type TrackComparator = (left: LibraryTrack, right: LibraryTrack) => number;
+
+const trackComparators = {
+  album: (left, right) =>
+    compareText(left.album, right.album) ||
+    compareText(left.artist, right.artist) ||
+    compareText(left.name, right.name),
+  artist: (left, right) =>
+    compareText(left.artist, right.artist) ||
+    compareText(left.album, right.album) ||
+    compareText(left.name, right.name),
+  name: (left, right) =>
+    compareText(left.name, right.name) ||
+    compareText(left.artist, right.artist) ||
+    compareText(left.album, right.album),
+  playCount: (left, right) =>
+    right.playCount - left.playCount ||
+    compareText(left.artist, right.artist) ||
+    compareText(left.name, right.name),
+  year: (left, right) =>
+    right.year - left.year ||
+    compareText(left.artist, right.artist) ||
+    compareText(left.name, right.name),
+} satisfies Record<TrackSortBy, TrackComparator>;
+
+/**
+ * Choose the one comparison Music evaluates itself. The longest text filter wins because
+ * substring matches prune far more than year or play-count bounds. Numeric bounds fall back
+ * in the order that pruned most on a real library: play-count floor, year ceiling, year
+ * floor, play-count ceiling.
+ */
+export const pickFindTracksPrefilter = (
+  criteria: TrackCriteria
+): FindTracksPrefilter | undefined => {
+  let longest:
+    | { property: (typeof TEXT_FILTERS)[number][0]; value: string }
+    | undefined;
+  for (const [property, field] of TEXT_FILTERS) {
+    const value = criteria[field];
+    if (
+      value !== undefined &&
+      value !== "" &&
+      (!longest || value.length > longest.value.length)
+    ) {
+      longest = { property, value };
+    }
+  }
+  if (longest) {
+    return { ...longest, operator: "_contains" };
+  }
+
+  if (criteria.playCountMin !== undefined) {
     return {
-      structuredContent: result,
-      logData: { playlistId, trackCount: result.tracks.length, total: result.total },
+      operator: "_greaterThanEquals",
+      property: "playedCount",
+      value: criteria.playCountMin,
     };
-  },
-});
-
-export const addTracksToPlaylistTool = defineTool({
-  name: "music.add_tracks_to_playlist",
-  description: "Add tracks to a playlist by their persistent IDs.",
-  inputSchema: trackMutationInputSchema,
-  outputSchema: addTracksOutputSchema,
-  annotations: ADDITIVE_WRITE_ANNOTATIONS,
-  writesRequired: true,
-  dryRunResult({ playlistId, trackIds }) {
+  }
+  if (criteria.yearMax !== undefined) {
     return {
-      playlistId,
-      requested: trackIds.length,
-      added: trackIds.length,
-      addedTrackIds: trackIds,
-      missingTrackIds: [],
-      failedTrackIds: [],
+      operator: "_lessThanEquals",
+      property: "year",
+      value: criteria.yearMax,
     };
-  },
-  async handler({ playlistId, trackIds }) {
-    const result = await addTracksToPlaylist(playlistId, trackIds);
+  }
+  if (criteria.yearMin !== undefined) {
     return {
-      structuredContent: result,
-      logData: {
-        playlistId,
-        requestedCount: result.requested,
-        addedCount: result.added,
-        missingCount: result.missingTrackIds.length,
-        failedCount: result.failedTrackIds.length,
-      },
+      operator: "_greaterThanEquals",
+      property: "year",
+      value: criteria.yearMin,
     };
-  },
-});
-
-export const removeTracksFromPlaylistTool = defineTool({
-  name: "music.remove_tracks_from_playlist",
-  description: "Remove every matching instance of tracks from a playlist by persistent ID.",
-  inputSchema: trackMutationInputSchema,
-  outputSchema: removeTracksOutputSchema,
-  annotations: {
-    readOnlyHint: false,
-    destructiveHint: true,
-    idempotentHint: true,
-    openWorldHint: false,
-  },
-  writesRequired: true,
-  dryRunResult({ playlistId, trackIds }) {
+  }
+  if (criteria.playCountMax !== undefined) {
     return {
-      playlistId,
-      requested: trackIds.length,
-      removed: trackIds.length,
-      removedTrackIds: trackIds,
-      missingTrackIds: [],
-      failedTrackIds: [],
+      operator: "_lessThanEquals",
+      property: "playedCount",
+      value: criteria.playCountMax,
     };
-  },
-  async handler({ playlistId, trackIds }) {
-    const result = await defaultTrackOperations.removeTracksFromPlaylist(playlistId, trackIds);
-    return {
-      structuredContent: result,
-      logData: {
-        playlistId,
-        requestedCount: result.requested,
-        removedCount: result.removed,
-        missingCount: result.missingTrackIds.length,
-        failedCount: result.failedTrackIds.length,
-      },
-    };
-  },
-});
+  }
+  return undefined;
+};
 
-async function findTracksWithRunner(
-  run: typeof runAppleScript,
-  criteria: TrackCriteria,
-): Promise<FindTracksResult> {
-  const validatedCriteria = trackCriteriaSchema.parse(criteria);
-  const seedQuery = pickTrackSearchSeed(validatedCriteria);
-  const safeSeedQuery = escapeAppleScriptString(seedQuery ?? "");
-
-  const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 120 seconds
-            if "${safeSeedQuery}" is not "" then
-                set sourceTracks to (search library playlist 1 for "${safeSeedQuery}" only all)
-            else
-                set sourceTracks to tracks of library playlist 1
-            end if
-
-            set sourceCount to count of sourceTracks
-            set scannedCount to sourceCount
-            if scannedCount > ${FIND_TRACKS_CANDIDATE_CAP} then set scannedCount to ${FIND_TRACKS_CANDIDATE_CAP}
-            set truncatedValue to "false"
-            if sourceCount > scannedCount then set truncatedValue to "true"
-
-            set trackRows to {}
-            if scannedCount > 0 then
-                repeat with i from 1 to scannedCount
-                    set t to item i of sourceTracks
-                    try
-                        set trackId to persistent ID of t as text
-                        set trackName to name of t as text
-                        set trackArtist to artist of t as text
-                        set trackAlbum to album of t as text
-                        set trackGenre to genre of t as text
-                        set trackDuration to duration of t
-                        set trackYear to year of t
-                        set trackPlayCount to played count of t
-
-                        set end of trackRows to {trackId, trackName, trackArtist, trackAlbum, trackGenre, trackDuration, trackYear, trackPlayCount}
-                    end try
-                end repeat
-            end if
-            return "{\\"tracks\\":" & my jsonTracks(trackRows) & ",\\"scanned\\":" & scannedCount & ",\\"truncated\\":" & truncatedValue & "}"
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try
-
-on jsonTracks(rows)
-    set serializedRows to {}
-    repeat with row in rows
-        set tId to item 1 of row
-        set tName to item 2 of row
-        set tArtist to item 3 of row
-        set tAlbum to item 4 of row
-        set tGenre to item 5 of row
-        set tDuration to item 6 of row
-        set tYear to item 7 of row
-        set tPlayCount to item 8 of row
-        set end of serializedRows to "{\\"id\\":\\"" & my jsonEscape(tId as text) & "\\",\\"name\\":\\"" & my jsonEscape(tName as text) & "\\",\\"artist\\":\\"" & my jsonEscape(tArtist as text) & "\\",\\"album\\":\\"" & my jsonEscape(tAlbum as text) & "\\",\\"genre\\":\\"" & my jsonEscape(tGenre as text) & "\\",\\"duration\\":" & tDuration & ",\\"year\\":" & tYear & ",\\"playCount\\":" & tPlayCount & "}"
-    end repeat
-    set previousDelimiters to AppleScript's text item delimiters
-    set AppleScript's text item delimiters to ","
-    set json to serializedRows as text
-    set AppleScript's text item delimiters to previousDelimiters
-    return "[" & json & "]"
-end jsonTracks`;
-
-  const result = await run(buildScript(body), 120_000);
-
-  const parsed = parseAppleScriptJsonOutput(
-    result.stdout,
-    findTracksScriptResultSchema,
-    "Music returned an invalid find tracks payload.",
-  );
-
-  const sortBy = validatedCriteria.sortBy ?? "name";
-  const limit = validatedCriteria.limit ?? 50;
-  const sorted = parsed.tracks
-    .filter((track) => matchesTrackCriteria(track, validatedCriteria))
-    .sort(createTrackComparator(sortBy));
-
-  return {
-    tracks: sorted.slice(0, limit),
-    totalMatched: sorted.length,
-    limit,
-    scanned: parsed.scanned,
-    truncated: parsed.truncated,
+/** Build the predicate once per call so the text needles are lowercased once, not per row. */
+const createTrackMatcher = (
+  criteria: TrackCriteria
+): ((track: LibraryTrack) => boolean) => {
+  const needles: [
+    property: (typeof TEXT_FILTERS)[number][0],
+    needle: string,
+  ][] = [];
+  for (const [property, field] of TEXT_FILTERS) {
+    const needle = criteria[field];
+    if (needle !== undefined && needle !== "") {
+      needles.push([property, needle.toLowerCase()]);
+    }
+  }
+  const { yearMin, yearMax, playCountMin, playCountMax } = criteria;
+  return (track) => {
+    for (const [property, needle] of needles) {
+      if (!track[property].toLowerCase().includes(needle)) {
+        return false;
+      }
+    }
+    if (yearMin !== undefined && track.year < yearMin) {
+      return false;
+    }
+    if (yearMax !== undefined && track.year > yearMax) {
+      return false;
+    }
+    if (playCountMin !== undefined && track.playCount < playCountMin) {
+      return false;
+    }
+    if (playCountMax !== undefined && track.playCount > playCountMax) {
+      return false;
+    }
+    return true;
   };
-}
+};
 
-async function getPlaylistTracks(
-  playlistId: string,
-  offset: number,
-  limit: number,
-): Promise<{ tracks: Track[]; total: number; offset: number; limit: number }> {
-  const safeId = escapeAppleScriptString(playlistId);
-  const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 60 seconds
-            set targetPlaylist to first user playlist whose persistent ID is "${safeId}"
-            set allTracks to tracks of targetPlaylist
-            set totalCount to count of allTracks
-            set trackRows to {}
-            set startIdx to ${offset + 1}
-            set endIdx to ${offset} + ${limit}
-            if endIdx > totalCount then set endIdx to totalCount
-            if startIdx > totalCount then
-                return "{\\"tracks\\":[],\\"total\\":" & totalCount & ",\\"offset\\":${offset},\\"limit\\":${limit}}"
-            end if
-            repeat with i from startIdx to endIdx
-                set t to item i of allTracks
-                try
-                    set trackId to persistent ID of t as text
-                    set trackName to name of t as text
-                    set trackArtist to artist of t as text
-                    set trackAlbum to album of t as text
-                    set trackDuration to duration of t
-                    set end of trackRows to {trackId, trackName, trackArtist, trackAlbum, trackDuration}
-                end try
-            end repeat
-            return "{\\"tracks\\":" & my jsonTracks(trackRows) & ",\\"total\\":" & totalCount & ",\\"offset\\":${offset},\\"limit\\":${limit}}"
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try
+export const matchesTrackCriteria = (
+  track: LibraryTrack,
+  criteria: TrackCriteria
+): boolean => createTrackMatcher(criteria)(track);
 
-on jsonTracks(rows)
-    set json to "["
-    repeat with i from 1 to (count of rows)
-        set row to item i of rows
-        set tId to item 1 of row
-        set tName to item 2 of row
-        set tArtist to item 3 of row
-        set tAlbum to item 4 of row
-        set tDuration to item 5 of row
-        set json to json & "{\\"id\\":\\"" & my jsonEscape(tId as text) & "\\",\\"name\\":\\"" & my jsonEscape(tName as text) & "\\",\\"artist\\":\\"" & my jsonEscape(tArtist as text) & "\\",\\"album\\":\\"" & my jsonEscape(tAlbum as text) & "\\",\\"duration\\":" & tDuration & "}"
-        if i < (count of rows) then
-            set json to json & ","
-        end if
-    end repeat
-    return json & "]"
-end jsonTracks`;
-
-  const result = await runAppleScript(buildScript(body), 60_000);
-
-  const parsed = parseAppleScriptJsonOutput(
-    result.stdout,
-    playlistTracksResultSchema,
-    "Music returned an invalid playlist tracks payload.",
-  );
-  return parsed;
-}
-
-async function addTracksToPlaylistWithRunner(
-  run: typeof runAppleScript,
-  playlistId: string,
-  trackIds: string[],
-): Promise<AddTracksResult> {
-  assertUniqueTrackIds(trackIds);
-  const safePlaylistId = escapeAppleScriptString(playlistId);
-  const idList = trackIds.map((id) => `"${escapeAppleScriptString(id)}"`).join(", ");
-  const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 60 seconds
-            set targetPlaylist to first user playlist whose persistent ID is "${safePlaylistId}"
-            set trackIdList to {${idList}}
-            set addedTrackIds to {}
-            set missingTrackIds to {}
-            set failedTrackIds to {}
-            repeat with tid in trackIdList
-                set targetTrack to missing value
-                try
-                    set targetTrack to first track of library playlist 1 whose persistent ID is tid
-                on error
-                    set end of missingTrackIds to (tid as text)
-                end try
-                if targetTrack is not missing value then
-                    try
-                        duplicate targetTrack to targetPlaylist
-                        set end of addedTrackIds to (tid as text)
-                    on error
-                        set end of failedTrackIds to (tid as text)
-                    end try
-                end if
-            end repeat
-            return "{\\"playlistId\\":\\"${safePlaylistId}\\",\\"requested\\":" & (count of trackIdList) & ",\\"added\\":" & (count of addedTrackIds) & ",\\"addedTrackIds\\":" & my jsonStringArray(addedTrackIds) & ",\\"missingTrackIds\\":" & my jsonStringArray(missingTrackIds) & ",\\"failedTrackIds\\":" & my jsonStringArray(failedTrackIds) & "}"
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try`;
-
-  const result = await run(buildScript(body), 60_000);
-
-  const parsed = parseAppleScriptJsonOutput(
-    result.stdout,
-    addTracksResultSchema,
-    "Music returned an invalid add tracks payload.",
-  );
-  const { classifiedIds, classificationSets } = validateTrackMutationClassifications(
-    parsed,
-    playlistId,
-    trackIds,
-    [parsed.addedTrackIds, parsed.missingTrackIds, parsed.failedTrackIds],
-    "Music returned inconsistent add track results.",
-  );
-  const classificationCount = classificationSets.reduce((sum, ids) => sum + ids.size, 0);
-  if (parsed.added !== parsed.addedTrackIds.length || classificationCount !== classifiedIds.size) {
-    throw new MusicToolError("script_error", "Music returned inconsistent add track results.");
+const columnValue = <Value>(column: Value[], index: number): Value => {
+  const value = column[index];
+  if (value === undefined) {
+    throw new MusicToolError("script_error", INVALID_FIND_TRACKS_PAYLOAD);
   }
-  return parsed;
-}
+  return value;
+};
 
-async function removeTracksFromPlaylistWithRunner(
-  run: typeof runAppleScript,
-  playlistId: string,
-  trackIds: string[],
-): Promise<RemoveTracksResult> {
-  assertUniqueTrackIds(trackIds);
-  const safePlaylistId = escapeAppleScriptString(playlistId);
-  const idList = trackIds.map((id) => `"${escapeAppleScriptString(id)}"`).join(", ");
-  const body = `
-try
-    tell application id "com.apple.Music"
-        with timeout of 60 seconds
-            set targetPlaylist to first user playlist whose persistent ID is "${safePlaylistId}"
-            set targetTrackIds to {${idList}}
-            set removedCount to 0
-            set removedTrackIds to {}
-            set failedTrackIds to {}
-            set playlistTracks to tracks of targetPlaylist
-            repeat with i from (count of playlistTracks) to 1 by -1
-                set t to item i of playlistTracks
-                try
-                    set trackId to persistent ID of t as text
-                    if targetTrackIds contains trackId then
-                        try
-                            delete t
-                            set removedCount to removedCount + 1
-                            if removedTrackIds does not contain trackId then
-                                set end of removedTrackIds to trackId
-                            end if
-                        on error
-                            if failedTrackIds does not contain trackId then
-                                set end of failedTrackIds to trackId
-                            end if
-                        end try
-                    end if
-                end try
-            end repeat
-            set missingTrackIds to {}
-            repeat with tid in targetTrackIds
-                set trackId to tid as text
-                if removedTrackIds does not contain trackId and failedTrackIds does not contain trackId then
-                    set end of missingTrackIds to trackId
-                end if
-            end repeat
-            return "{\\"playlistId\\":\\"${safePlaylistId}\\",\\"requested\\":" & (count of targetTrackIds) & ",\\"removed\\":" & removedCount & ",\\"removedTrackIds\\":" & my jsonStringArray(removedTrackIds) & ",\\"missingTrackIds\\":" & my jsonStringArray(missingTrackIds) & ",\\"failedTrackIds\\":" & my jsonStringArray(failedTrackIds) & "}"
-        end timeout
-    end tell
-on error errMsg number errNum
-    error errMsg number errNum
-end try`;
+const trackAt = (columns: TrackColumns, index: number): LibraryTrack => ({
+  album: columnValue(columns.albums, index),
+  artist: columnValue(columns.artists, index),
+  duration: columnValue(columns.durations, index),
+  genre: columnValue(columns.genres, index),
+  id: columnValue(columns.ids, index),
+  name: columnValue(columns.names, index),
+  playCount: columnValue(columns.playCounts, index),
+  year: columnValue(columns.years, index),
+});
 
-  const result = await run(buildScript(body), 60_000);
-
-  const parsed = parseAppleScriptJsonOutput(
-    result.stdout,
-    removeTracksResultSchema,
-    "Music returned an invalid remove tracks payload.",
-  );
-  validateRemoveTracksResult(parsed, playlistId, trackIds);
-  return parsed;
-}
-
-function parseAppleScriptJsonOutput<Schema extends z.ZodType>(
-  stdout: string,
-  schema: Schema,
-  invalidPayloadMessage: string,
-): z.output<Schema> {
-  try {
-    return schema.parse(JSON.parse(stdout));
-  } catch {
-    throw new MusicToolError("script_error", invalidPayloadMessage, {
-      outputLength: stdout.length,
-    });
+const assertUniqueTrackIds = (trackIds: string[]): void => {
+  if (hasDuplicateTrackIds(trackIds)) {
+    throw new MusicToolError("validation_error", "Track IDs must be unique.");
   }
-}
+};
 
-function validateTrackMutationClassifications(
+const validateTrackMutationClassifications = (
   result: { playlistId: string; requested: number },
   playlistId: string,
   trackIds: string[],
   classifications: string[][],
-  inconsistentResultMessage: string,
-): { classifiedIds: Set<string>; classificationSets: Set<string>[] } {
+  inconsistentResultMessage: string
+) => {
   const requestedIds = toCanonicalTrackIdSet(trackIds);
   const classificationSets = classifications.map(toCanonicalTrackIdSet);
   const classifiedIds = new Set(classificationSets.flatMap((ids) => [...ids]));
-  const containsUnknownId = [...classifiedIds].some((id) => !requestedIds.has(id));
+  const containsUnknownId = [...classifiedIds].some(
+    (id) => !requestedIds.has(id)
+  );
 
   if (
     canonicalTrackId(result.playlistId) !== canonicalTrackId(playlistId) ||
@@ -606,112 +535,431 @@ function validateTrackMutationClassifications(
   ) {
     throw new MusicToolError("script_error", inconsistentResultMessage);
   }
-  return { classifiedIds, classificationSets };
-}
+  return { classificationSets, classifiedIds };
+};
 
-function validateRemoveTracksResult(
+const validateRemoveTracksResult = (
   result: RemoveTracksResult,
   playlistId: string,
-  trackIds: string[],
-): void {
-  const { classificationSets } = validateTrackMutationClassifications(
+  trackIds: string[]
+): void => {
+  validateTrackMutationClassifications(
     result,
     playlistId,
     trackIds,
     [result.removedTrackIds, result.missingTrackIds, result.failedTrackIds],
-    "Music returned inconsistent remove track results.",
+    "Music returned inconsistent remove track results."
   );
-  const removedIds = classificationSets[0]!;
-  const missingIds = classificationSets[1]!;
-  const failedIds = classificationSets[2]!;
+  const removedIds = toCanonicalTrackIdSet(result.removedTrackIds);
+  const missingIds = toCanonicalTrackIdSet(result.missingTrackIds);
+  const failedIds = toCanonicalTrackIdSet(result.failedTrackIds);
   const missingOverlapsOutcome = [...missingIds].some(
-    (id) => removedIds.has(id) || failedIds.has(id),
+    (id) => removedIds.has(id) || failedIds.has(id)
   );
 
-  if (result.removed < result.removedTrackIds.length || missingOverlapsOutcome) {
-    throw new MusicToolError("script_error", "Music returned inconsistent remove track results.");
+  if (
+    result.removed < result.removedTrackIds.length ||
+    missingOverlapsOutcome
+  ) {
+    throw new MusicToolError(
+      "script_error",
+      "Music returned inconsistent remove track results."
+    );
   }
-}
+};
 
-function assertUniqueTrackIds(trackIds: string[]): void {
-  if (hasDuplicateTrackIds(trackIds)) {
-    throw new MusicToolError("validation_error", "Track IDs must be unique.");
+const findTracksWithRunner = async (
+  execFn: ExecFn | undefined,
+  criteria: TrackCriteria
+): Promise<FindTracksResult> => {
+  const validatedCriteria = trackCriteriaSchema.parse(criteria);
+  const prefilter = pickFindTracksPrefilter(validatedCriteria);
+  const whoseLiteral = prefilter
+    ? toJavaScriptLiteral({
+        [prefilter.property]: { [prefilter.operator]: prefilter.value },
+      })
+    : "null";
+
+  // Music accepts only one comparison per whose clause from JXA; the rest is filtered in TS.
+  // Property reads on an empty whose result throw, so the count check guards them.
+  const body = `
+const whose = ${whoseLiteral};
+const library = music.libraryPlaylists[0];
+const candidates = whose ? library.tracks.whose(whose) : library.tracks;
+let candidateCount = candidates.length;
+let columns = { ids: [], names: [], artists: [], albums: [], genres: [], durations: [], years: [], playCounts: [] };
+if (candidateCount > 0) {
+    columns = {
+        ids: candidates.persistentID(),
+        names: candidates.name(),
+        artists: candidates.artist(),
+        albums: candidates.album(),
+        genres: candidates.genre(),
+        durations: candidates.duration(),
+        years: candidates.year(),
+        playCounts: candidates.playedCount(),
+    };
+    candidateCount = columns.ids.length;
+    for (const name of Object.keys(columns)) {
+        if (columns[name].length !== candidateCount) {
+            throw new Error("Music library changed while reading tracks.");
+        }
+        columns[name] = columns[name].slice(0, ${FIND_TRACKS_CANDIDATE_CAP});
+    }
+}
+JSON.stringify({ columns, scanned: columns.ids.length, truncated: candidateCount > columns.ids.length });`;
+
+  const result = await runJavaScript(buildJavaScript(body), 120_000, execFn);
+
+  const parsed = parseAppleScriptJson(
+    result.stdout,
+    findTracksPayloadSchema,
+    INVALID_FIND_TRACKS_PAYLOAD
+  );
+  const sortBy = validatedCriteria.sortBy ?? "name";
+  const limit = validatedCriteria.limit ?? 50;
+  const matches = createTrackMatcher(validatedCriteria);
+  const matched: LibraryTrack[] = [];
+  for (let index = 0; index < parsed.scanned; index += 1) {
+    const track = trackAt(parsed.columns, index);
+    if (matches(track)) {
+      matched.push(track);
+    }
   }
-}
+  matched.sort(trackComparators[sortBy]);
 
-export function createTrackOperations(run: typeof runAppleScript = runAppleScript) {
   return {
-    findTracks: (criteria: TrackCriteria) => findTracksWithRunner(run, criteria),
-    addTracksToPlaylist: (playlistId: string, trackIds: string[]) =>
-      addTracksToPlaylistWithRunner(run, playlistId, trackIds),
-    removeTracksFromPlaylist: (playlistId: string, trackIds: string[]) =>
-      removeTracksFromPlaylistWithRunner(run, playlistId, trackIds),
+    limit,
+    scanned: parsed.scanned,
+    totalMatched: matched.length,
+    tracks: findTracksPageSchema.parse(matched.slice(0, limit)),
+    truncated: parsed.truncated,
   };
+};
+
+const getPlaylistTracksWithRunner = async (
+  execFn: ExecFn | undefined,
+  playlistId: string,
+  offset: number,
+  limit: number
+): Promise<{
+  tracks: Track[];
+  total: number;
+  offset: number;
+  limit: number;
+}> => {
+  // JXA's slice(start, end) on a Music collection includes both ends, returns nothing when
+  // start equals end, and throws when end passes the last entry. So the page is clamped first
+  // and a one-entry page reads that entry by index.
+  const body = `
+const playlistId = ${toJavaScriptLiteral(playlistId)};
+const offset = ${offset};
+const limit = ${limit};
+${PIN_USER_PLAYLIST}
+const total = playlist.tracks.length;
+const end = Math.min(offset + limit, total) - 1;
+let ids = [];
+let names = [];
+let artists = [];
+let albums = [];
+let durations = [];
+if (offset === end) {
+    const entry = playlist.tracks[offset];
+    ids = [entry.persistentID()];
+    names = [entry.name()];
+    artists = [entry.artist()];
+    albums = [entry.album()];
+    durations = [entry.duration()];
+} else if (offset < end) {
+    const page = playlist.tracks.slice(offset, end);
+    ids = page.persistentID();
+    names = page.name();
+    artists = page.artist();
+    albums = page.album();
+    durations = page.duration();
 }
+if ([names, artists, albums, durations].some((column) => column.length !== ids.length)) {
+    throw new Error("Music playlist changed while reading tracks.");
+}
+const tracks = ids.map((id, index) => ({
+    id,
+    name: names[index],
+    artist: artists[index],
+    album: albums[index],
+    duration: durations[index],
+}));
+JSON.stringify({ tracks, total, offset, limit });`;
+
+  const result = await runJavaScript(buildJavaScript(body), 60_000, execFn);
+
+  return parseAppleScriptJson(
+    result.stdout,
+    playlistTracksResultSchema,
+    "Music returned an invalid playlist tracks payload."
+  );
+};
+
+const addTracksToPlaylistWithRunner = async (
+  execFn: ExecFn | undefined,
+  playlistId: string,
+  trackIds: string[]
+): Promise<AddTracksResult> => {
+  assertUniqueTrackIds(trackIds);
+  // One bulk read of the library's IDs replaces a library-wide whose lookup per requested ID.
+  // Music rejects duplicating a list of tracks (-10006), so tracks are still duplicated one at a time.
+  const body = `
+const requestedIds = ${toJavaScriptLiteral(trackIds)};
+const playlistId = ${toJavaScriptLiteral(playlistId)};
+${PIN_USER_PLAYLIST}
+const library = music.libraryPlaylists[0];
+const libraryIds = library.tracks.length > 0 ? library.tracks.persistentID() : [];
+const databaseIds = library.tracks.length > 0 ? library.tracks.id() : [];
+if (libraryIds.length !== databaseIds.length) {
+    throw new Error("Music library changed while reading tracks.");
+}
+const databaseIdByTrackId = new Map();
+libraryIds.forEach((id, index) => databaseIdByTrackId.set(id.toUpperCase(), databaseIds[index]));
+const addedTrackIds = [];
+const missingTrackIds = [];
+const failedTrackIds = [];
+for (const trackId of requestedIds) {
+    const databaseId = databaseIdByTrackId.get(trackId.toUpperCase());
+    if (databaseId === undefined) {
+        missingTrackIds.push(trackId);
+        continue;
+    }
+    try {
+        music.duplicate(library.tracks.byId(databaseId), {to: playlist});
+        addedTrackIds.push(trackId);
+    } catch (error) {
+        failedTrackIds.push(trackId);
+    }
+}
+JSON.stringify({
+    playlistId,
+    requested: requestedIds.length,
+    added: addedTrackIds.length,
+    addedTrackIds,
+    missingTrackIds,
+    failedTrackIds,
+});`;
+
+  const result = await runJavaScript(buildJavaScript(body), 60_000, execFn);
+
+  const parsed = parseAppleScriptJson(
+    result.stdout,
+    addTracksResultSchema,
+    "Music returned an invalid add tracks payload."
+  );
+  const { classifiedIds, classificationSets } =
+    validateTrackMutationClassifications(
+      parsed,
+      playlistId,
+      trackIds,
+      [parsed.addedTrackIds, parsed.missingTrackIds, parsed.failedTrackIds],
+      "Music returned inconsistent add track results."
+    );
+  const classificationCount = classificationSets.reduce(
+    (sum, ids) => sum + ids.size,
+    0
+  );
+  if (
+    parsed.added !== parsed.addedTrackIds.length ||
+    classificationCount !== classifiedIds.size
+  ) {
+    throw new MusicToolError(
+      "script_error",
+      "Music returned inconsistent add track results."
+    );
+  }
+  return parsed;
+};
+
+const removeTracksFromPlaylistWithRunner = async (
+  execFn: ExecFn | undefined,
+  playlistId: string,
+  trackIds: string[]
+): Promise<RemoveTracksResult> => {
+  assertUniqueTrackIds(trackIds);
+  // Every playlist entry has its own database ID, so deleting by that ID stays correct even if
+  // the playlist shifts under the script; the reverse walk only keeps the pairing with entryIds.
+  const body = `
+const requestedIds = ${toJavaScriptLiteral(trackIds)};
+const playlistId = ${toJavaScriptLiteral(playlistId)};
+${PIN_USER_PLAYLIST}
+const entryIds = playlist.tracks.length > 0 ? playlist.tracks.persistentID() : [];
+const databaseIds = playlist.tracks.length > 0 ? playlist.tracks.id() : [];
+if (entryIds.length !== databaseIds.length) {
+    throw new Error("Music playlist changed while reading tracks.");
+}
+const requestedByCanonicalId = new Map(requestedIds.map((id) => [id.toUpperCase(), id]));
+let removed = 0;
+const removedTrackIds = new Set();
+const failedTrackIds = new Set();
+for (let index = entryIds.length - 1; index >= 0; index -= 1) {
+    const trackId = requestedByCanonicalId.get(entryIds[index].toUpperCase());
+    if (trackId === undefined) continue;
+    try {
+        music.delete(playlist.tracks.byId(databaseIds[index]));
+        removed += 1;
+        removedTrackIds.add(trackId);
+    } catch (error) {
+        failedTrackIds.add(trackId);
+    }
+}
+const missingTrackIds = requestedIds.filter(
+    (id) => !removedTrackIds.has(id) && !failedTrackIds.has(id),
+);
+JSON.stringify({
+    playlistId,
+    requested: requestedIds.length,
+    removed,
+    removedTrackIds: [...removedTrackIds],
+    missingTrackIds,
+    failedTrackIds: [...failedTrackIds],
+});`;
+
+  const result = await runJavaScript(buildJavaScript(body), 60_000, execFn);
+
+  const parsed = parseAppleScriptJson(
+    result.stdout,
+    removeTracksResultSchema,
+    "Music returned an invalid remove tracks payload."
+  );
+  validateRemoveTracksResult(parsed, playlistId, trackIds);
+  return parsed;
+};
+
+export const createTrackOperations = (execFn?: ExecFn) => ({
+  addTracksToPlaylist: async (playlistId: string, trackIds: string[]) =>
+    await addTracksToPlaylistWithRunner(execFn, playlistId, trackIds),
+  findTracks: async (criteria: TrackCriteria) =>
+    await findTracksWithRunner(execFn, criteria),
+  getPlaylistTracks: async (
+    playlistId: string,
+    offset: number,
+    limit: number
+  ) => await getPlaylistTracksWithRunner(execFn, playlistId, offset, limit),
+  removeTracksFromPlaylist: async (playlistId: string, trackIds: string[]) =>
+    await removeTracksFromPlaylistWithRunner(execFn, playlistId, trackIds),
+});
 
 const defaultTrackOperations = createTrackOperations();
-export const findTracks = defaultTrackOperations.findTracks;
-export const addTracksToPlaylist = defaultTrackOperations.addTracksToPlaylist;
+export const { findTracks } = defaultTrackOperations;
+export const { addTracksToPlaylist } = defaultTrackOperations;
 
-function createTrackComparator(
-  sortBy: TrackSortBy,
-): (left: LibraryTrack, right: LibraryTrack) => number {
-  switch (sortBy) {
-    case "artist":
-      return (left, right) =>
-        compareText(left.artist, right.artist) ||
-        compareText(left.album, right.album) ||
-        compareText(left.name, right.name);
-    case "album":
-      return (left, right) =>
-        compareText(left.album, right.album) ||
-        compareText(left.artist, right.artist) ||
-        compareText(left.name, right.name);
-    case "year":
-      return (left, right) =>
-        right.year - left.year ||
-        compareText(left.artist, right.artist) ||
-        compareText(left.name, right.name);
-    case "playCount":
-      return (left, right) =>
-        right.playCount - left.playCount ||
-        compareText(left.artist, right.artist) ||
-        compareText(left.name, right.name);
-    case "name":
-    default:
-      return (left, right) =>
-        compareText(left.name, right.name) ||
-        compareText(left.artist, right.artist) ||
-        compareText(left.album, right.album);
-  }
-}
+export const findTracksTool = defineTool({
+  annotations: READ_ONLY_ANNOTATIONS,
+  description: `Find library tracks by name, artist, album, genre, year, or play count across the whole library.\nRequires at least one filter. Up to ${CANDIDATE_CAP_TEXT} candidates are examined; when truncated is true, totalMatched is a lower bound.`,
+  async handler(criteria) {
+    const result = await findTracks(criteria);
+    return {
+      logData: {
+        returnedCount: result.tracks.length,
+        scanned: result.scanned,
+        sortBy: criteria.sortBy ?? "name",
+        totalMatched: result.totalMatched,
+        truncated: result.truncated,
+      },
+      structuredContent: result,
+    };
+  },
+  inputSchema: trackCriteriaSchema,
+  name: "music.find_tracks",
+  outputSchema: findTracksOutputSchema,
+  writesRequired: false,
+});
 
-function compareText(left: string, right: string): number {
-  return left.localeCompare(right, "en", { sensitivity: "base" });
-}
+export const getPlaylistTracksTool = defineTool({
+  annotations: READ_ONLY_ANNOTATIONS,
+  description:
+    "Get one page of a playlist's tracks with persistent IDs, using offset and limit.",
+  async handler({ playlistId, offset, limit }) {
+    const result = await defaultTrackOperations.getPlaylistTracks(
+      playlistId,
+      offset ?? 0,
+      limit ?? 50
+    );
+    return {
+      logData: {
+        playlistId,
+        total: result.total,
+        trackCount: result.tracks.length,
+      },
+      structuredContent: result,
+    };
+  },
+  inputSchema: getPlaylistTracksInputSchema,
+  name: "music.get_playlist_tracks",
+  outputSchema: getPlaylistTracksOutputSchema,
+  writesRequired: false,
+});
 
-export function pickTrackSearchSeed(criteria: TrackCriteria): string | undefined {
-  const candidates = [criteria.nameQuery, criteria.artist, criteria.album, criteria.genre]
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value))
-    .sort((left, right) => right.length - left.length);
+export const addTracksToPlaylistTool = defineTool({
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
+  description:
+    "Add up to 100 unique tracks to a playlist by persistent ID and report per-ID outcomes.\nRequires APPLE_MUSIC_MCP_ENABLE_WRITES=true. Not atomic: check missingTrackIds and failedTrackIds.",
+  dryRunResult({ playlistId, trackIds }) {
+    return {
+      added: trackIds.length,
+      addedTrackIds: trackIds,
+      failedTrackIds: [],
+      missingTrackIds: [],
+      playlistId,
+      requested: trackIds.length,
+    };
+  },
+  async handler({ playlistId, trackIds }) {
+    const result = await addTracksToPlaylist(playlistId, trackIds);
+    return {
+      logData: {
+        addedCount: result.added,
+        failedCount: result.failedTrackIds.length,
+        missingCount: result.missingTrackIds.length,
+        playlistId,
+        requestedCount: result.requested,
+      },
+      structuredContent: result,
+    };
+  },
+  inputSchema: trackMutationInputSchema,
+  name: "music.add_tracks_to_playlist",
+  outputSchema: addTracksOutputSchema,
+  writesRequired: true,
+});
 
-  return candidates[0];
-}
-
-export function matchesTrackCriteria(track: LibraryTrack, criteria: TrackCriteria): boolean {
-  if (!containsText(track.name, criteria.nameQuery)) return false;
-  if (!containsText(track.artist, criteria.artist)) return false;
-  if (!containsText(track.album, criteria.album)) return false;
-  if (!containsText(track.genre, criteria.genre)) return false;
-  if (criteria.yearMin !== undefined && track.year < criteria.yearMin) return false;
-  if (criteria.yearMax !== undefined && track.year > criteria.yearMax) return false;
-  if (criteria.playCountMin !== undefined && track.playCount < criteria.playCountMin) return false;
-  if (criteria.playCountMax !== undefined && track.playCount > criteria.playCountMax) return false;
-  return true;
-}
-
-function containsText(value: string, needle: string | undefined): boolean {
-  if (!needle) return true;
-  return value.toLowerCase().includes(needle.toLowerCase());
-}
+export const removeTracksFromPlaylistTool = defineTool({
+  annotations: DESTRUCTIVE_WRITE_ANNOTATIONS,
+  description:
+    "Remove every instance of up to 100 unique tracks from a playlist and report per-ID outcomes.\nRequires APPLE_MUSIC_MCP_ENABLE_WRITES=true. Not atomic: check missingTrackIds and failedTrackIds.",
+  dryRunResult({ playlistId, trackIds }) {
+    return {
+      failedTrackIds: [],
+      missingTrackIds: [],
+      playlistId,
+      removed: trackIds.length,
+      removedTrackIds: trackIds,
+      requested: trackIds.length,
+    };
+  },
+  async handler({ playlistId, trackIds }) {
+    const result = await defaultTrackOperations.removeTracksFromPlaylist(
+      playlistId,
+      trackIds
+    );
+    return {
+      logData: {
+        failedCount: result.failedTrackIds.length,
+        missingCount: result.missingTrackIds.length,
+        playlistId,
+        removedCount: result.removed,
+        requestedCount: result.requested,
+      },
+      structuredContent: result,
+    };
+  },
+  inputSchema: trackMutationInputSchema,
+  name: "music.remove_tracks_from_playlist",
+  outputSchema: removeTracksOutputSchema,
+  writesRequired: true,
+});

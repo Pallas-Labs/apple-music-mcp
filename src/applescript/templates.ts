@@ -46,11 +46,25 @@ end replaceText
  * Build a complete AppleScript from a body block.
  * Prepends the "ensure Music is running" preamble and appends shared JSON handlers.
  */
-export function buildScript(body: string): string {
-  return `${PREAMBLE}\n${body}\n${SHARED_HANDLERS}`;
+export const buildScript = (body: string): string =>
+  `${PREAMBLE}\n${body}\n${SHARED_HANDLERS}`;
+
+const JXA_PREAMBLE = `
+const music = Application("Music");
+if (!music.running()) {
+    music.launch();
 }
+for (let attempt = 0; attempt < 50 && !music.running(); attempt += 1) {
+    delay(0.1);
+}
+`;
+
+/**
+ * Build a complete JXA script from a body block.
+ * Prepends the "ensure Music is running" preamble, which binds `music` for the body to use.
+ */
+export const buildJavaScript = (body: string): string =>
+  `${JXA_PREAMBLE}\n${body}`;
 
 /** Build a script that doesn't need the Music preamble (e.g. health checks). */
-export function buildRawScript(body: string): string {
-  return body;
-}
+export const buildRawScript = (body: string): string => body;

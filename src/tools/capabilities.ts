@@ -1,47 +1,41 @@
 import * as z from "zod/v4";
-import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from "../config.js";
+
+import { SERVER_NAME, SERVER_VERSION } from "../config.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
 
 const capabilitiesInputSchema = z.object({});
 const capabilitiesOutputSchema = z.object({
+  dryRun: z
+    .boolean()
+    .describe(
+      "True when mutation tools return previews without changing Music."
+    ),
   serverName: z.string(),
   serverVersion: z.string(),
-  writesEnabled: z.boolean(),
-  dryRun: z.boolean(),
-  tools: z.array(z.string()),
+  tools: z
+    .array(z.string())
+    .describe("Names of every tool this server provides."),
+  writesEnabled: z
+    .boolean()
+    .describe("True when mutation tools may change Apple Music."),
 });
 
 export const capabilitiesTool = defineTool({
-  name: "music.capabilities",
-  description: "Report server capabilities and runtime flags.",
-  inputSchema: capabilitiesInputSchema,
-  outputSchema: capabilitiesOutputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
-  writesRequired: false,
-  async handler() {
+  description:
+    "Report the server version, write and dry-run flags, and the names of all tools.",
+  async handler(_input, { config, toolNames }) {
     const capabilities = {
+      dryRun: config.dryRun,
       serverName: SERVER_NAME,
       serverVersion: SERVER_VERSION,
-      writesEnabled: runtimeConfig.writesEnabled,
-      dryRun: runtimeConfig.dryRun,
-      tools: [
-        "music.capabilities",
-        "music.health",
-        "music.list_folders",
-        "music.list_playlists",
-        "music.create_playlist",
-        "music.create_playlist_from_criteria",
-        "music.create_folder",
-        "music.move_playlist",
-        "music.get_now_playing",
-        "music.playback_control",
-        "music.search_library",
-        "music.find_tracks",
-        "music.get_playlist_tracks",
-        "music.add_tracks_to_playlist",
-        "music.remove_tracks_from_playlist",
-      ],
+      tools: [...toolNames],
+      writesEnabled: config.writesEnabled,
     };
-    return { structuredContent: capabilities };
+    return await Promise.resolve({ structuredContent: capabilities });
   },
+  inputSchema: capabilitiesInputSchema,
+  name: "music.capabilities",
+  outputSchema: capabilitiesOutputSchema,
+  writesRequired: false,
 });

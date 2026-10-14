@@ -6,11 +6,27 @@ export type MusicToolErrorCode =
   | "timeout"
   | "script_error";
 
+/** JSON-safe diagnostic values. `undefined` members drop out when serialized. */
+export type DiagnosticValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | readonly DiagnosticValue[]
+  | { readonly [key: string]: DiagnosticValue };
+
+export type DiagnosticData = Readonly<Record<string, DiagnosticValue>>;
+
 export class MusicToolError extends Error {
   readonly code: MusicToolErrorCode;
-  readonly details: Record<string, unknown> | undefined;
+  readonly details: DiagnosticData | undefined;
 
-  constructor(code: MusicToolErrorCode, message: string, details?: Record<string, unknown>) {
+  constructor(
+    code: MusicToolErrorCode,
+    message: string,
+    details?: DiagnosticData
+  ) {
     super(message);
     this.name = "MusicToolError";
     this.code = code;
@@ -18,34 +34,13 @@ export class MusicToolError extends Error {
   }
 }
 
-export type MusicHealth = {
-  musicRunning: boolean;
-  permissionGranted: boolean;
-  serverVersion: string;
-};
-
-export type Folder = {
-  id: string;
-  name: string;
-  isRoot: boolean;
-  parentId?: string;
-};
-
-export type Playlist = {
-  id: string;
-  name: string;
-  folderId?: string;
-  isSmart: boolean;
-  trackCount?: number;
-};
-
-export type Track = {
+export interface Track {
   id: string;
   name: string;
   artist: string;
   album: string;
   duration: number;
-};
+}
 
 export type LibraryTrack = Track & {
   genre: string;
@@ -55,7 +50,7 @@ export type LibraryTrack = Track & {
 
 export type TrackSortBy = "name" | "artist" | "album" | "year" | "playCount";
 
-export type TrackCriteria = {
+export interface TrackCriteria {
   nameQuery?: string | undefined;
   artist?: string | undefined;
   album?: string | undefined;
@@ -66,13 +61,4 @@ export type TrackCriteria = {
   playCountMax?: number | undefined;
   limit?: number | undefined;
   sortBy?: TrackSortBy | undefined;
-};
-
-export type NowPlaying = {
-  name: string;
-  artist: string;
-  album: string;
-  duration: number;
-  position: number;
-  playerState: "playing" | "paused" | "stopped";
-};
+}

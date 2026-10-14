@@ -1,42 +1,52 @@
 import * as z from "zod/v4";
-import { runAppleScript } from "../applescript/runner.js";
+
 import { escapeAppleScriptString } from "../applescript/escape.js";
+import { parseAppleScriptJson } from "../applescript/parse.js";
+import { runAppleScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
-import { MusicToolError } from "../types.js";
-import type { Track } from "../types.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
+import type { ToolSchemaOutput } from "../tool-contracts.js";
+import { durationOutputSchema, trackIdOutputSchema } from "./tracks.js";
 
 const searchLibraryInputSchema = z.object({
-  query: z.string().trim().min(1).max(255).describe("Search query (matches track name or artist)."),
-  limit: z.number().int().min(1).max(50).optional().describe("Max results (default 50)."),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .describe("Maximum results, 1-50 (default 50)."),
+  query: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .describe(
+      "Search text, 1-255 characters. Uses the Music app's library search."
+    ),
 });
 const searchLibraryOutputSchema = z.object({
   tracks: z.array(
     z.object({
-      id: z.string(),
-      name: z.string(),
-      artist: z.string(),
       album: z.string(),
-      duration: z.number(),
-    }),
+      artist: z.string(),
+      duration: durationOutputSchema,
+      id: trackIdOutputSchema,
+      name: z.string(),
+    })
   ),
 });
 
-export const searchLibraryTool = defineTool({
-  name: "music.search_library",
-  description:
-    "Search the Apple Music library for tracks by name or artist. Returns up to 50 results.",
-  inputSchema: searchLibraryInputSchema,
-  outputSchema: searchLibraryOutputSchema,
-  annotations: READ_ONLY_ANNOTATIONS,
-  writesRequired: false,
-  async handler({ query, limit }) {
-    const tracks = await searchLibrary(query, limit ?? 50);
-    return { structuredContent: { tracks }, logData: { query, resultCount: tracks.length } };
-  },
-});
+type SearchResult = ToolSchemaOutput<
+  typeof searchLibraryOutputSchema
+>["tracks"];
 
-async function searchLibrary(query: string, limit: number): Promise<Track[]> {
+const searchLibrary = async (
+  query: string,
+  limit: number,
+  execFn: ExecFn | undefined
+): Promise<SearchResult> => {
   const safeQuery = escapeAppleScriptString(query);
   const body = `
 try
@@ -82,15 +92,34 @@ on jsonTracks(rows)
     return json & "]"
 end jsonTracks`;
 
-  const result = await runAppleScript(buildScript(body), 30_000);
+  const result = await runAppleScript(buildScript(body), 30_000, execFn);
+  return parseAppleScriptJson(
+    result.stdout,
+    searchLibraryOutputSchema.shape.tracks,
+    "Music returned an invalid search payload."
+  );
+};
 
-  let parsed: Track[];
-  try {
-    parsed = JSON.parse(result.stdout) as Track[];
-  } catch {
-    throw new MusicToolError("script_error", "Music returned an invalid search payload.", {
-      outputLength: result.stdout.length,
-    });
-  }
-  return parsed;
-}
+export const createSearchOperations = (execFn?: ExecFn) => ({
+  searchLibrary: async (query: string, limit: number) =>
+    await searchLibrary(query, limit, execFn),
+});
+
+const searchOperations = createSearchOperations();
+
+export const searchLibraryTool = defineTool({
+  annotations: READ_ONLY_ANNOTATIONS,
+  description:
+    "Search the Apple Music library for tracks by text and return up to 50 matches with persistent IDs.",
+  async handler({ query, limit }) {
+    const tracks = await searchOperations.searchLibrary(query, limit ?? 50);
+    return {
+      logData: { query, resultCount: tracks.length },
+      structuredContent: { tracks },
+    };
+  },
+  inputSchema: searchLibraryInputSchema,
+  name: "music.search_library",
+  outputSchema: searchLibraryOutputSchema,
+  writesRequired: false,
+});
