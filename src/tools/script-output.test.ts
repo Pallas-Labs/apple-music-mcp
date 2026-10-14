@@ -54,7 +54,7 @@ const CASES: Case[] = [
     ],
     message: "Music returned an invalid playlist payload.",
     name: "music.list_folders",
-    run:  async (execFn) => createFolderOperations(execFn).listFolders(true),
+    run: async (execFn) => createFolderOperations(execFn).listFolders(true),
     valid: PLAYLIST_ENTRIES,
     wrongShape: JSON.stringify([
       { id: "AAAA1111BBBB2222", name: "Top", kind: "smart" },
@@ -72,7 +72,7 @@ const CASES: Case[] = [
     ],
     message: "Music returned an invalid playlist parent payload.",
     name: "music.list_folders non-empty filter",
-    run:  async (execFn) => createFolderOperations(execFn).listFolders(false),
+    run: async (execFn) => createFolderOperations(execFn).listFolders(false),
     valid: JSON.stringify(["", "AAAA1111BBBB2222", "CCCC3333DDDD4444"]),
     wrongShape: JSON.stringify(["", "AAAA1111BBBB2222"]),
   },
@@ -80,7 +80,7 @@ const CASES: Case[] = [
     expected: { id: "AAAA1111BBBB2222", isRoot: true, name: "Top" },
     message: "Music returned an invalid create folder payload.",
     name: "music.create_folder",
-    run:  async (execFn) =>
+    run: async (execFn) =>
       createFolderOperations(execFn).createFolder({ name: "Top" }),
     valid: JSON.stringify({
       id: "AAAA1111BBBB2222",
@@ -105,7 +105,8 @@ const CASES: Case[] = [
     ],
     message: "Music returned an invalid search payload.",
     name: "music.search_library",
-    run:  async (execFn) => createSearchOperations(execFn).searchLibrary("love", 5),
+    run: async (execFn) =>
+      createSearchOperations(execFn).searchLibrary("love", 5),
     valid: JSON.stringify([
       {
         id: "AAAABBBBCCCCDDDD",
@@ -129,7 +130,7 @@ const CASES: Case[] = [
     },
     message: "Music returned an invalid move playlist payload.",
     name: "music.move_playlist",
-    run:  async (execFn) =>
+    run: async (execFn) =>
       createMoveOperations(execFn).movePlaylist({
         playlistId: "ABCDEF1234567890",
         targetFolderId: "AAAA1111BBBB2222",
@@ -149,7 +150,7 @@ const CASES: Case[] = [
     ],
     message: "Music returned an invalid playlist payload.",
     name: "music.list_playlists",
-    run:  async (execFn) => createPlaylistOperations(execFn).listPlaylists({}),
+    run: async (execFn) => createPlaylistOperations(execFn).listPlaylists({}),
     valid: PLAYLIST_ENTRIES,
     wrongShape: JSON.stringify([
       { id: "ABCDEF1234567890", name: "Road Trip", kind: "user" },
@@ -164,7 +165,7 @@ const CASES: Case[] = [
     },
     message: "Music returned an invalid create playlist payload.",
     name: "music.create_playlist",
-    run:  async (execFn) =>
+    run: async (execFn) =>
       createPlaylistOperations(execFn).createPlaylist({ name: "Road Trip" }),
     valid: JSON.stringify({ ...PLAYLIST_ROW, trackCount: 0 }),
     wrongShape: JSON.stringify({ id: "ABCDEF1234567890", name: "Road Trip" }),
@@ -180,7 +181,7 @@ const CASES: Case[] = [
     },
     message: "Music returned an invalid now playing payload.",
     name: "music.get_now_playing",
-    run:  async (execFn) => createPlaybackOperations(execFn).getNowPlaying(),
+    run: async (execFn) => createPlaybackOperations(execFn).getNowPlaying(),
     valid: JSON.stringify({
       playerState: "paused",
       name: "Song",
@@ -202,7 +203,8 @@ const CASES: Case[] = [
     expected: { action: "pause", playerState: "paused", success: true },
     message: "Music returned an invalid playback control payload.",
     name: "music.playback_control",
-    run:  async (execFn) => createPlaybackOperations(execFn).controlPlayback("pause"),
+    run: async (execFn) =>
+      createPlaybackOperations(execFn).controlPlayback("pause"),
     valid: JSON.stringify({
       success: true,
       action: "pause",

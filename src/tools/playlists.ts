@@ -2,8 +2,8 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from '../applescript/runner.js';
-import type { ExecFn } from '../applescript/runner.js';
+import { runAppleScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
 import { nameSchema, persistentIdSchema } from "../config.js";
 import { withMutationLock } from "../mutation-lock.js";
@@ -13,8 +13,14 @@ import {
   READ_ONLY_ANNOTATIONS,
 } from "../tool-contracts.js";
 import { readParentIds, readPlaylistEntries } from "./playlist-tree.js";
-import { addTracksToPlaylist, findTracks, scannedOutputSchema, trackCriteriaSchema, truncatedOutputSchema } from './tracks.js';
-import type { AddTracksResult } from './tracks.js';
+import {
+  addTracksToPlaylist,
+  findTracks,
+  scannedOutputSchema,
+  trackCriteriaSchema,
+  truncatedOutputSchema,
+} from "./tracks.js";
+import type { AddTracksResult } from "./tracks.js";
 
 export const playlistSchema = z.object({
   folderId: z
@@ -113,10 +119,12 @@ const createPlaylistFromCriteriaOutputSchema = z.object({
 
 export function createPlaylistOperations(execFn?: ExecFn) {
   return {
-    createPlaylist:  async (input: { name: string; folderId?: string }) =>
+    createPlaylist: async (input: { name: string; folderId?: string }) =>
       createPlaylist(input, execFn),
-    listPlaylists:  async (input: { folderId?: string; includeRoot?: boolean }) =>
-      listPlaylists(input, execFn),
+    listPlaylists: async (input: {
+      folderId?: string;
+      includeRoot?: boolean;
+    }) => listPlaylists(input, execFn),
   };
 }
 
@@ -286,9 +294,12 @@ async function listPlaylists(
   const includeRoot = input.includeRoot ?? true;
   return playlists.flatMap(({ id, name, isSmart }) => {
     const folderId = parentIds.get(id) ?? "";
-    if (input.folderId !== undefined && folderId !== input.folderId) {return [];}
-    if (input.folderId === undefined && !includeRoot && folderId === "")
-      {return [];}
+    if (input.folderId !== undefined && folderId !== input.folderId) {
+      return [];
+    }
+    if (input.folderId === undefined && !includeRoot && folderId === "") {
+      return [];
+    }
     return [{ id, isSmart, name, ...(folderId === "" ? {} : { folderId }) }];
   });
 }
@@ -342,6 +353,8 @@ end jsonPlaylist`;
     trackCount: 0,
   };
   const folderId = parsed.folderId.trim();
-  if (folderId.length > 0) {output.folderId = folderId;}
+  if (folderId.length > 0) {
+    output.folderId = folderId;
+  }
   return output;
 }

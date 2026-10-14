@@ -6,8 +6,13 @@ import { runJavaScript } from "../applescript/runner.js";
 import type { ExecFn } from "../applescript/runner.js";
 import { buildJavaScript } from "../applescript/templates.js";
 import { persistentIdSchema } from "../config.js";
-import { ADDITIVE_WRITE_ANNOTATIONS, defineTool, DESTRUCTIVE_WRITE_ANNOTATIONS, READ_ONLY_ANNOTATIONS } from '../tool-contracts.js';
-import type { ToolSchemaOutput } from '../tool-contracts.js';
+import {
+  ADDITIVE_WRITE_ANNOTATIONS,
+  defineTool,
+  DESTRUCTIVE_WRITE_ANNOTATIONS,
+  READ_ONLY_ANNOTATIONS,
+} from "../tool-contracts.js";
+import type { ToolSchemaOutput } from "../tool-contracts.js";
 import { MusicToolError } from "../types.js";
 import type {
   LibraryTrack,
@@ -495,7 +500,9 @@ JSON.stringify({ columns, scanned: columns.ids.length, truncated: candidateCount
   const matched: LibraryTrack[] = [];
   for (let index = 0; index < parsed.scanned; index += 1) {
     const track = trackAt(parsed.columns, index);
-    if (matches(track)) {matched.push(track);}
+    if (matches(track)) {
+      matched.push(track);
+    }
   }
   matched.sort(createTrackComparator(sortBy));
 
@@ -530,7 +537,9 @@ function parseFindTracksPayload(stdout: string): {
   } catch {
     throw invalid();
   }
-  if (typeof payload !== "object" || payload === null) {throw invalid();}
+  if (typeof payload !== "object" || payload === null) {
+    throw invalid();
+  }
   const { columns, scanned, truncated } = payload as Record<string, unknown>;
   if (
     typeof columns !== "object" ||
@@ -539,12 +548,18 @@ function parseFindTracksPayload(stdout: string): {
   ) {
     throw invalid();
   }
-  if (!Number.isInteger(scanned) || (scanned as number) < 0) {throw invalid();}
+  if (!Number.isInteger(scanned) || (scanned as number) < 0) {
+    throw invalid();
+  }
   for (const [name, elementType] of TRACK_COLUMNS) {
     const column = (columns as Record<string, unknown>)[name];
-    if (!Array.isArray(column) || column.length !== scanned) {throw invalid();}
+    if (!Array.isArray(column) || column.length !== scanned) {
+      throw invalid();
+    }
     for (const value of column) {
-      if (typeof value !== elementType) {throw invalid();}
+      if (typeof value !== elementType) {
+        throw invalid();
+      }
     }
   }
   return {
@@ -819,20 +834,23 @@ function assertUniqueTrackIds(trackIds: string[]): void {
 
 export function createTrackOperations(execFn?: ExecFn) {
   return {
-    addTracksToPlaylist:  async (playlistId: string, trackIds: string[]) =>
+    addTracksToPlaylist: async (playlistId: string, trackIds: string[]) =>
       addTracksToPlaylistWithRunner(execFn, playlistId, trackIds),
-    findTracks:  async (criteria: TrackCriteria) =>
+    findTracks: async (criteria: TrackCriteria) =>
       findTracksWithRunner(execFn, criteria),
-    getPlaylistTracks:  async (playlistId: string, offset: number, limit: number) =>
-      getPlaylistTracksWithRunner(execFn, playlistId, offset, limit),
-    removeTracksFromPlaylist:  async (playlistId: string, trackIds: string[]) =>
+    getPlaylistTracks: async (
+      playlistId: string,
+      offset: number,
+      limit: number
+    ) => getPlaylistTracksWithRunner(execFn, playlistId, offset, limit),
+    removeTracksFromPlaylist: async (playlistId: string, trackIds: string[]) =>
       removeTracksFromPlaylistWithRunner(execFn, playlistId, trackIds),
   };
 }
 
 const defaultTrackOperations = createTrackOperations();
-export const {findTracks} = defaultTrackOperations;
-export const {addTracksToPlaylist} = defaultTrackOperations;
+export const { findTracks } = defaultTrackOperations;
+export const { addTracksToPlaylist } = defaultTrackOperations;
 
 function createTrackComparator(
   sortBy: TrackSortBy
@@ -906,7 +924,9 @@ export function pickFindTracksPrefilter(
       longest = { property, value };
     }
   }
-  if (longest) {return { ...longest, operator: "_contains" };}
+  if (longest) {
+    return { ...longest, operator: "_contains" };
+  }
 
   if (criteria.playCountMin !== undefined) {
     return {
@@ -956,19 +976,29 @@ function createTrackMatcher(
   ][] = [];
   for (const [property, field] of TEXT_FILTERS) {
     const needle = criteria[field];
-    if (needle) {needles.push([property, needle.toLowerCase()]);}
+    if (needle) {
+      needles.push([property, needle.toLowerCase()]);
+    }
   }
   const { yearMin, yearMax, playCountMin, playCountMax } = criteria;
   return (track) => {
     for (const [property, needle] of needles) {
-      if (!track[property].toLowerCase().includes(needle)) {return false;}
+      if (!track[property].toLowerCase().includes(needle)) {
+        return false;
+      }
     }
-    if (yearMin !== undefined && track.year < yearMin) {return false;}
-    if (yearMax !== undefined && track.year > yearMax) {return false;}
-    if (playCountMin !== undefined && track.playCount < playCountMin)
-      {return false;}
-    if (playCountMax !== undefined && track.playCount > playCountMax)
-      {return false;}
+    if (yearMin !== undefined && track.year < yearMin) {
+      return false;
+    }
+    if (yearMax !== undefined && track.year > yearMax) {
+      return false;
+    }
+    if (playCountMin !== undefined && track.playCount < playCountMin) {
+      return false;
+    }
+    if (playCountMax !== undefined && track.playCount > playCountMax) {
+      return false;
+    }
     return true;
   };
 }

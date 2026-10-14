@@ -2,12 +2,17 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from '../applescript/runner.js';
-import type { ExecFn } from '../applescript/runner.js';
+import { runAppleScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
 import { buildScript, buildRawScript } from "../applescript/templates.js";
 import { persistentIdSchema } from "../config.js";
-import { ADDITIVE_WRITE_ANNOTATIONS, defineTool, IDEMPOTENT_WRITE_ANNOTATIONS, READ_ONLY_ANNOTATIONS } from '../tool-contracts.js';
-import type { ToolSchemaOutput } from '../tool-contracts.js';
+import {
+  ADDITIVE_WRITE_ANNOTATIONS,
+  defineTool,
+  IDEMPOTENT_WRITE_ANNOTATIONS,
+  READ_ONLY_ANNOTATIONS,
+} from "../tool-contracts.js";
+import type { ToolSchemaOutput } from "../tool-contracts.js";
 import { MusicToolError } from "../types.js";
 
 const playerStateSchema = z.enum(["playing", "paused", "stopped"]);
@@ -119,7 +124,10 @@ const setPlayerOutputSchema = z.object({
   volume: z.number().int().describe("Output volume, 0-100."),
 });
 
-export interface PlayTarget { kind: "playlist" | "track"; id: string }
+export interface PlayTarget {
+  kind: "playlist" | "track";
+  id: string;
+}
 type PlayResult = ToolSchemaOutput<typeof playOutputSchema>;
 export type PlayerSettings = ToolSchemaOutput<typeof setPlayerInputSchema>;
 type PlayerStatus = ToolSchemaOutput<typeof setPlayerOutputSchema>;
@@ -491,4 +499,4 @@ export function createPlaybackOperations(execFn?: ExecFn) {
 }
 
 const playbackOperations = createPlaybackOperations();
-export const {getNowPlaying} = playbackOperations;
+export const { getNowPlaying } = playbackOperations;

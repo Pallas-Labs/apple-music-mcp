@@ -62,9 +62,13 @@ const defaultExecFn: ExecFn = async (script, timeoutMs, language) => {
 
 export function parseAppleScriptErrorNumber(stderr: string): number | null {
   const matches = stderr.match(/\((-?\d+)\)/g);
-  if (!matches || matches.length === 0) {return null;}
+  if (!matches || matches.length === 0) {
+    return null;
+  }
   const last = matches.at(-1);
-  if (!last) {return null;}
+  if (!last) {
+    return null;
+  }
   const numeric = Number(last.replaceAll(/[()]/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
 }

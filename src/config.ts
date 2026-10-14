@@ -41,7 +41,9 @@ export const persistentIdSchema = z
 
 export function readBooleanEnv(name: string): boolean {
   const value = process.env[name];
-  if (!value) {return false;}
+  if (!value) {
+    return false;
+  }
   const normalized = value.trim().toLowerCase();
   return (
     normalized === "1" ||

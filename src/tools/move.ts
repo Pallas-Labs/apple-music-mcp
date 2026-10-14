@@ -2,13 +2,13 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from '../applescript/runner.js';
-import type { ExecFn } from '../applescript/runner.js';
+import { runAppleScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
 import { persistentIdSchema } from "../config.js";
 import { defineTool, IDEMPOTENT_WRITE_ANNOTATIONS } from "../tool-contracts.js";
-import { playlistRowSchema } from './playlists.js';
-import type { Playlist } from './playlists.js';
+import { playlistRowSchema } from "./playlists.js";
+import type { Playlist } from "./playlists.js";
 
 const movePlaylistInputSchema = z.object({
   playlistId: persistentIdSchema.describe(
@@ -129,8 +129,10 @@ end jsonPlaylist`;
 
 export function createMoveOperations(execFn?: ExecFn) {
   return {
-    movePlaylist:  async (input: { playlistId: string; targetFolderId: string }) =>
-      movePlaylist(input, execFn),
+    movePlaylist: async (input: {
+      playlistId: string;
+      targetFolderId: string;
+    }) => movePlaylist(input, execFn),
   };
 }
 

@@ -54,7 +54,11 @@ export interface ToolContext {
   toolNames: readonly string[];
 }
 
-interface BaseToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> {
+interface BaseToolDef<
+  Input extends ToolSchema,
+  Output extends ToolSchema,
+  Args,
+> {
   name: string;
   description: string;
   inputSchema: Input;

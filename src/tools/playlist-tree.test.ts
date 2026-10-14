@@ -12,7 +12,7 @@ test("readParentIds splits large reads across processes and keeps each parent wi
   // Answer each process with "P" + ID, in reverse order of arrival, so mismatched joins would show.
   const execFn: ExecFn = async (script) => {
     const chunk = JSON.parse(
-      (/(\[[^\]]*\])\.map/.exec(script))?.[1] ?? "[]"
+      /(\[[^\]]*\])\.map/.exec(script)?.[1] ?? "[]"
     ) as string[];
     chunkSizes.push(chunk.length);
     await new Promise((resolve) =>

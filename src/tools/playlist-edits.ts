@@ -7,8 +7,8 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from '../applescript/runner.js';
-import type { ExecFn } from '../applescript/runner.js';
+import { runAppleScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
 import { nameSchema, persistentIdSchema } from "../config.js";
 import {
@@ -17,8 +17,8 @@ import {
   IDEMPOTENT_WRITE_ANNOTATIONS,
 } from "../tool-contracts.js";
 import { MusicToolError } from "../types.js";
-import { playlistSchema } from './playlists.js';
-import type { Playlist } from './playlists.js';
+import { playlistSchema } from "./playlists.js";
+import type { Playlist } from "./playlists.js";
 
 const PLAYLIST_KINDS = ["user", "folder", "subscription", "system"] as const;
 type PlaylistKind = (typeof PLAYLIST_KINDS)[number];
@@ -209,9 +209,9 @@ export function createPlaylistEditOperations(execFn?: ExecFn) {
   }
 
   return {
-    describe:  async (playlistId: string) =>
+    describe: async (playlistId: string) =>
       runPlaylistScript(playlistId, buildPlaylistScript(playlistId)),
-    rename:  async (playlistId: string, name: string) =>
+    rename: async (playlistId: string, name: string) =>
       editPlaylist(
         playlistId,
         "rename",
@@ -220,7 +220,7 @@ export function createPlaylistEditOperations(execFn?: ExecFn) {
       ),
     // Music sometimes answers delete with an AppleEvent timeout (-1712) after it has deleted the
     // playlist, so a timeout counts as success once the playlist is gone.
-    delete:  async (playlistId: string) =>
+    delete: async (playlistId: string) =>
       editPlaylist(
         playlistId,
         "delete",
