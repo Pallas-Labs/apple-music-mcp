@@ -5,10 +5,10 @@ import { MusicToolError } from "../types.js";
 
 const execFileAsync = promisify(execFile);
 
-export type AppleScriptExecResult = {
+export interface AppleScriptExecResult {
   stdout: string;
   stderr: string;
-};
+}
 
 type AppleScriptExecError = NodeJS.ErrnoException & {
   stderr?: string;
@@ -49,23 +49,23 @@ const defaultExecFn: ExecFn = async (script, timeoutMs, language) => {
       ? ["-l", "JavaScript", "-e", script]
       : ["-s", "s", "-e", script];
   const { stdout, stderr } = await execFileAsync("osascript", languageArgs, {
-    encoding: "utf8",
+    encoding: "utf-8",
     timeout: timeoutMs,
     // Bulk track reads can return tens of thousands of JSON rows.
     maxBuffer: 64 * 1024 * 1024,
   });
   return {
-    stdout: stdout.trim(),
     stderr: (stderr ?? "").trim(),
+    stdout: stdout.trim(),
   };
 };
 
 export function parseAppleScriptErrorNumber(stderr: string): number | null {
   const matches = stderr.match(/\((-?\d+)\)/g);
-  if (!matches || matches.length === 0) return null;
-  const last = matches[matches.length - 1];
-  if (!last) return null;
-  const numeric = Number(last.replace(/[()]/g, ""));
+  if (!matches || matches.length === 0) {return null;}
+  const last = matches.at(-1);
+  if (!last) {return null;}
+  const numeric = Number(last.replaceAll(/[()]/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
 }
 
@@ -81,21 +81,21 @@ export function mapAppleScriptError(
     });
   }
 
-  if (errorNumber === -1743 || errorNumber === -10004) {
+  if (errorNumber === -1743 || errorNumber === -10_004) {
     return new MusicToolError(
       "permission_denied",
       "Permission denied to control Music. Grant automation access in System Settings > Privacy & Security > Automation.",
-      { stderr, errorNumber }
+      { errorNumber, stderr }
     );
   }
 
-  if (errorNumber === -600 || errorNumber === -10810) {
+  if (errorNumber === -600 || errorNumber === -10_810) {
     return new MusicToolError(
       "music_not_running",
       "Music app is not running or unavailable.",
       {
-        stderr,
         errorNumber,
+        stderr,
       }
     );
   }
@@ -109,21 +109,21 @@ export function mapAppleScriptError(
         "music_not_running",
         "Music app is not running or unavailable.",
         {
-          stderr,
           errorNumber,
+          stderr,
         }
       );
     }
     return new MusicToolError("not_found", "Music entity not found.", {
-      stderr,
       errorNumber,
+      stderr,
     });
   }
 
   return new MusicToolError("script_error", "Failed to execute AppleScript.", {
-    stderr,
-    errorNumber,
     code: error.code,
+    errorNumber,
+    stderr,
   });
 }
 
@@ -136,15 +136,15 @@ async function runScript(
   try {
     const result = await execFn(script, timeoutMs, language);
     return {
-      stdout: normalizeAppleScriptStdout(result.stdout),
       stderr: result.stderr.trim(),
+      stdout: normalizeAppleScriptStdout(result.stdout),
     };
   } catch (error) {
     throw mapAppleScriptError(error as AppleScriptExecError);
   }
 }
 
-export function runAppleScript(
+export async function runAppleScript(
   script: string,
   timeoutMs = 15_000,
   execFn: ExecFn = defaultExecFn
@@ -153,7 +153,7 @@ export function runAppleScript(
 }
 
 /** Run a JXA script. Errors surface with the same AppleScript error numbers. */
-export function runJavaScript(
+export async function runJavaScript(
   script: string,
   timeoutMs = 15_000,
   execFn: ExecFn = defaultExecFn

@@ -7,31 +7,31 @@ import type {
 import type { RuntimeConfig } from "./config.js";
 
 export const READ_ONLY_ANNOTATIONS = Object.freeze({
-  readOnlyHint: true,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
+  readOnlyHint: true,
 } satisfies ToolAnnotations);
 
 export const ADDITIVE_WRITE_ANNOTATIONS = Object.freeze({
-  readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: false,
   openWorldHint: false,
+  readOnlyHint: false,
 } satisfies ToolAnnotations);
 
 export const IDEMPOTENT_WRITE_ANNOTATIONS = Object.freeze({
-  readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
+  readOnlyHint: false,
 } satisfies ToolAnnotations);
 
 export const DESTRUCTIVE_WRITE_ANNOTATIONS = Object.freeze({
-  readOnlyHint: false,
   destructiveHint: true,
   idempotentHint: true,
   openWorldHint: false,
+  readOnlyHint: false,
 } satisfies ToolAnnotations);
 
 export type ToolSchema = StandardSchemaWithJSON;
@@ -39,12 +39,12 @@ export type ToolSchema = StandardSchemaWithJSON;
 export type ToolSchemaOutput<S extends ToolSchema> =
   StandardSchemaWithJSON.InferOutput<S>;
 
-export type ToolResult<Output extends ToolSchema> = {
+export interface ToolResult<Output extends ToolSchema> {
   structuredContent: ToolSchemaOutput<Output>;
   logData?: Record<string, unknown>;
-};
+}
 
-export type ToolContext = {
+export interface ToolContext {
   canElicit: boolean;
   /** Client responses to the input requests that an earlier round of this call returned. */
   inputResponses: Record<string, unknown> | undefined;
@@ -52,9 +52,9 @@ export type ToolContext = {
   config: RuntimeConfig;
   /** Names of the tools the server registered, in registration order. */
   toolNames: readonly string[];
-};
+}
 
-type BaseToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = {
+interface BaseToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> {
   name: string;
   description: string;
   inputSchema: Input;
@@ -64,7 +64,7 @@ type BaseToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = {
     input: Args,
     context: ToolContext
   ) => Promise<ToolResult<Output> | InputRequiredResult>;
-};
+}
 
 type ReadToolDef<
   Input extends ToolSchema,

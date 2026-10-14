@@ -2,7 +2,8 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript, type ExecFn } from "../applescript/runner.js";
+import { runAppleScript } from '../applescript/runner.js';
+import type { ExecFn } from '../applescript/runner.js';
 import { buildScript } from "../applescript/templates.js";
 import { nameSchema, persistentIdSchema } from "../config.js";
 import {
@@ -14,10 +15,10 @@ import { readParentIds, readPlaylistEntries } from "./playlist-tree.js";
 
 const folderSchema = z.object({
   id: z.string().describe("Persistent folder ID."),
-  name: z.string(),
   isRoot: z
     .boolean()
     .describe("True when the folder is at the top level of the library."),
+  name: z.string(),
   parentId: z
     .string()
     .optional()
@@ -53,13 +54,9 @@ const createFolderOutputSchema = z.object({
 });
 
 export const listFoldersTool = defineTool({
-  name: "music.list_folders",
+  annotations: READ_ONLY_ANNOTATIONS,
   description:
     "List Apple Music folder playlists with their persistent IDs and parent folder IDs.",
-  inputSchema: listFoldersInputSchema,
-  outputSchema: listFoldersOutputSchema,
-  annotations: READ_ONLY_ANNOTATIONS,
-  writesRequired: false,
   async handler({ includeEmpty = true }) {
     const folders = await folderOperations.listFolders(includeEmpty);
     return {
@@ -67,16 +64,16 @@ export const listFoldersTool = defineTool({
       logData: { folderCount: folders.length, includeEmpty },
     };
   },
+  inputSchema: listFoldersInputSchema,
+  name: "music.list_folders",
+  outputSchema: listFoldersOutputSchema,
+  writesRequired: false,
 });
 
 export const createFolderTool = defineTool({
-  name: "music.create_folder",
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
   description:
     "Create a folder playlist, optionally inside a parent folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  inputSchema: createFolderInputSchema,
-  outputSchema: createFolderOutputSchema,
-  annotations: ADDITIVE_WRITE_ANNOTATIONS,
-  writesRequired: true,
   dryRunResult({ name, parentId }) {
     return {
       folder: {
@@ -93,6 +90,10 @@ export const createFolderTool = defineTool({
     const folder = await folderOperations.createFolder(input);
     return { structuredContent: { folder }, logData: { folderId: folder.id } };
   },
+  inputSchema: createFolderInputSchema,
+  name: "music.create_folder",
+  outputSchema: createFolderOutputSchema,
+  writesRequired: true,
 });
 
 async function listFolders(
@@ -167,17 +168,17 @@ function toFolder(row: z.output<typeof folderRowSchema>): Folder {
   const parentId = row.parentId.trim();
   return {
     id: row.id,
-    name: row.name,
     isRoot: parentId.length === 0,
+    name: row.name,
     ...(parentId.length > 0 ? { parentId } : {}),
   };
 }
 
 export function createFolderOperations(execFn?: ExecFn) {
   return {
-    listFolders: (includeEmpty: boolean) => listFolders(includeEmpty, execFn),
-    createFolder: (input: { name: string; parentId?: string }) =>
+    createFolder:  async (input: { name: string; parentId?: string }) =>
       createFolder(input, execFn),
+    listFolders:  async (includeEmpty: boolean) => listFolders(includeEmpty, execFn),
   };
 }
 

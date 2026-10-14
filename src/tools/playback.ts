@@ -2,30 +2,26 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript, type ExecFn } from "../applescript/runner.js";
+import { runAppleScript } from '../applescript/runner.js';
+import type { ExecFn } from '../applescript/runner.js';
 import { buildScript, buildRawScript } from "../applescript/templates.js";
 import { persistentIdSchema } from "../config.js";
-import {
-  ADDITIVE_WRITE_ANNOTATIONS,
-  defineTool,
-  IDEMPOTENT_WRITE_ANNOTATIONS,
-  READ_ONLY_ANNOTATIONS,
-  type ToolSchemaOutput,
-} from "../tool-contracts.js";
+import { ADDITIVE_WRITE_ANNOTATIONS, defineTool, IDEMPOTENT_WRITE_ANNOTATIONS, READ_ONLY_ANNOTATIONS } from '../tool-contracts.js';
+import type { ToolSchemaOutput } from '../tool-contracts.js';
 import { MusicToolError } from "../types.js";
 
 const playerStateSchema = z.enum(["playing", "paused", "stopped"]);
 
 const getNowPlayingInputSchema = z.object({});
 const getNowPlayingOutputSchema = z.object({
-  name: z.string().describe("Track name. Empty when stopped."),
-  artist: z.string().describe("Track artist. Empty when stopped."),
   album: z.string().describe("Track album. Empty when stopped."),
+  artist: z.string().describe("Track artist. Empty when stopped."),
   duration: z.number().describe("Track length in seconds. 0 when stopped."),
+  name: z.string().describe("Track name. Empty when stopped."),
+  playerState: playerStateSchema,
   position: z
     .number()
     .describe("Playback position in seconds. 0 when stopped."),
-  playerState: playerStateSchema,
 });
 const playbackControlInputSchema = z.object({
   action: z
@@ -35,11 +31,11 @@ const playbackControlInputSchema = z.object({
     ),
 });
 const playbackControlOutputSchema = z.object({
-  success: z.boolean(),
   action: z.string().describe("The action that ran."),
   playerState: playerStateSchema.describe(
     "Player state shortly after the action ran."
   ),
+  success: z.boolean(),
 });
 
 const repeatModeSchema = z.enum(["off", "one", "all"]);
@@ -51,16 +47,16 @@ const playInputSchema = z
       .describe(
         "Persistent playlist ID from music.list_playlists or music.create_playlist. Give this or trackId."
       ),
-    trackId: persistentIdSchema
-      .optional()
-      .describe(
-        "Persistent track ID from music.search_library, music.find_tracks, or music.get_playlist_tracks. Give this or playlistId."
-      ),
     shuffle: z
       .boolean()
       .optional()
       .describe(
         "Turn shuffle on or off before playback starts. Omit to keep the current setting."
+      ),
+    trackId: persistentIdSchema
+      .optional()
+      .describe(
+        "Persistent track ID from music.search_library, music.find_tracks, or music.get_playlist_tracks. Give this or playlistId."
       ),
   })
   .refine(
@@ -76,27 +72,16 @@ const playOutputSchema = z.object({
   ),
   track: z
     .object({
+      album: z.string(),
+      artist: z.string(),
       id: z.string().describe("Persistent track ID."),
       name: z.string(),
-      artist: z.string(),
-      album: z.string(),
     })
     .nullable()
     .describe("The track now in the player, or null when no track is loaded."),
 });
 const setPlayerInputSchema = z
   .object({
-    volume: z
-      .number()
-      .int()
-      .min(0)
-      .max(100)
-      .optional()
-      .describe("Music's output volume, 0-100."),
-    shuffle: z.boolean().optional().describe("Turn shuffle on or off."),
-    repeat: repeatModeSchema
-      .optional()
-      .describe("Repeat mode: off, one (repeat the current track), or all."),
     position: z
       .number()
       .min(0)
@@ -104,6 +89,17 @@ const setPlayerInputSchema = z
       .describe(
         "Seek to this many seconds into the current track. Fails when the player is stopped."
       ),
+    repeat: repeatModeSchema
+      .optional()
+      .describe("Repeat mode: off, one (repeat the current track), or all."),
+    shuffle: z.boolean().optional().describe("Turn shuffle on or off."),
+    volume: z
+      .number()
+      .int()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe("Music's output volume, 0-100."),
   })
   .refine(
     (input) =>
@@ -114,16 +110,16 @@ const setPlayerInputSchema = z
     { message: "Give at least one of volume, shuffle, repeat, or position." }
   );
 const setPlayerOutputSchema = z.object({
-  volume: z.number().int().describe("Output volume, 0-100."),
-  shuffle: z.boolean().describe("True when shuffle is on."),
-  repeat: repeatModeSchema.describe("Repeat mode."),
+  playerState: playerStateSchema,
   position: z
     .number()
     .describe("Playback position in seconds. 0 when stopped."),
-  playerState: playerStateSchema,
+  repeat: repeatModeSchema.describe("Repeat mode."),
+  shuffle: z.boolean().describe("True when shuffle is on."),
+  volume: z.number().int().describe("Output volume, 0-100."),
 });
 
-export type PlayTarget = { kind: "playlist" | "track"; id: string };
+export interface PlayTarget { kind: "playlist" | "track"; id: string }
 type PlayResult = ToolSchemaOutput<typeof playOutputSchema>;
 export type PlayerSettings = ToolSchemaOutput<typeof setPlayerInputSchema>;
 type PlayerStatus = ToolSchemaOutput<typeof setPlayerOutputSchema>;
@@ -136,27 +132,23 @@ type PlaybackControlResult = ToolSchemaOutput<
 >;
 
 export const getNowPlayingTool = defineTool({
-  name: "music.get_now_playing",
+  annotations: READ_ONLY_ANNOTATIONS,
   description:
     "Get the currently playing track: name, artist, album, duration, position, and player state.",
-  inputSchema: getNowPlayingInputSchema,
-  outputSchema: getNowPlayingOutputSchema,
-  annotations: READ_ONLY_ANNOTATIONS,
-  writesRequired: false,
   async handler() {
     const nowPlaying = await playbackOperations.getNowPlaying();
     return { structuredContent: nowPlaying };
   },
+  inputSchema: getNowPlayingInputSchema,
+  name: "music.get_now_playing",
+  outputSchema: getNowPlayingOutputSchema,
+  writesRequired: false,
 });
 
 export const playbackControlTool = defineTool({
-  name: "music.playback_control",
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
   description:
     "Control Apple Music playback: play, pause, next, previous, or toggle. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  inputSchema: playbackControlInputSchema,
-  outputSchema: playbackControlOutputSchema,
-  annotations: ADDITIVE_WRITE_ANNOTATIONS,
-  writesRequired: true,
   dryRunResult({ action }) {
     const playerState: "paused" | "playing" =
       action === "pause" ? "paused" : "playing";
@@ -170,16 +162,16 @@ export const playbackControlTool = defineTool({
     const result = await playbackOperations.controlPlayback(action);
     return { structuredContent: result, logData: { action } };
   },
+  inputSchema: playbackControlInputSchema,
+  name: "music.playback_control",
+  outputSchema: playbackControlOutputSchema,
+  writesRequired: true,
 });
 
 export const playTool = defineTool({
-  name: "music.play",
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
   description:
     "Play a playlist or a library track, optionally setting shuffle first. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  inputSchema: playInputSchema,
-  outputSchema: playOutputSchema,
-  annotations: ADDITIVE_WRITE_ANNOTATIONS,
-  writesRequired: true,
   dryRunResult() {
     return { playerState: "playing" as const, track: null };
   },
@@ -198,16 +190,16 @@ export const playTool = defineTool({
       },
     };
   },
+  inputSchema: playInputSchema,
+  name: "music.play",
+  outputSchema: playOutputSchema,
+  writesRequired: true,
 });
 
 export const setPlayerTool = defineTool({
-  name: "music.set_player",
+  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
   description:
     "Set volume, shuffle, repeat, or playback position and report the result. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  inputSchema: setPlayerInputSchema,
-  outputSchema: setPlayerOutputSchema,
-  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
-  writesRequired: true,
   dryRunResult({ volume, shuffle, repeat, position }) {
     return {
       volume: volume ?? 0,
@@ -224,6 +216,10 @@ export const setPlayerTool = defineTool({
       logData: { changed: Object.keys(settings) },
     };
   },
+  inputSchema: setPlayerInputSchema,
+  name: "music.set_player",
+  outputSchema: setPlayerOutputSchema,
+  writesRequired: true,
 });
 
 function toPlayerState(value: string): PlayerStatus["playerState"] {
@@ -243,11 +239,11 @@ const setPlayerScriptResultSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(false) }),
   z.object({
     ok: z.literal(true),
-    volume: z.number().int(),
-    shuffle: z.boolean(),
-    repeat: repeatModeSchema,
-    position: z.number(),
     playerState: z.string(),
+    position: z.number(),
+    repeat: repeatModeSchema,
+    shuffle: z.boolean(),
+    volume: z.number().int(),
   }),
 ]);
 
@@ -390,9 +386,9 @@ const PLAYBACK_COMMANDS: Record<
   PlaybackAction,
   { command: string; settled: string }
 > = {
-  play: { command: "play", settled: 'pState is "playing"' },
-  pause: { command: "pause", settled: 'pState is "paused"' },
   next: { command: "next track", settled: 'pState is "playing"' },
+  pause: { command: "pause", settled: 'pState is "paused"' },
+  play: { command: "play", settled: 'pState is "playing"' },
   previous: { command: "previous track", settled: 'pState is "playing"' },
   toggle: { command: "playpause", settled: "pState is not startState" },
 };
@@ -419,14 +415,6 @@ end try`);
 
 export function createPlaybackOperations(execFn?: ExecFn) {
   return {
-    async getNowPlaying(): Promise<NowPlaying> {
-      const result = await runAppleScript(NOW_PLAYING_SCRIPT, 10_000, execFn);
-      return parseAppleScriptJson(
-        result.stdout,
-        getNowPlayingOutputSchema,
-        "Music returned an invalid now playing payload."
-      );
-    },
     async controlPlayback(
       action: PlaybackAction
     ): Promise<PlaybackControlResult> {
@@ -439,6 +427,14 @@ export function createPlaybackOperations(execFn?: ExecFn) {
         result.stdout,
         playbackControlOutputSchema,
         "Music returned an invalid playback control payload."
+      );
+    },
+    async getNowPlaying(): Promise<NowPlaying> {
+      const result = await runAppleScript(NOW_PLAYING_SCRIPT, 10_000, execFn);
+      return parseAppleScriptJson(
+        result.stdout,
+        getNowPlayingOutputSchema,
+        "Music returned an invalid now playing payload."
       );
     },
     async play(
@@ -495,4 +491,4 @@ export function createPlaybackOperations(execFn?: ExecFn) {
 }
 
 const playbackOperations = createPlaybackOperations();
-export const getNowPlaying = playbackOperations.getNowPlaying;
+export const {getNowPlaying} = playbackOperations;

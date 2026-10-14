@@ -15,20 +15,20 @@ describe("music.update_track input", () => {
     const schema = updateTrackTool.inputSchema;
     expect(schema.safeParse({ trackId: TRACK_ID }).success).toBe(false);
     expect(
-      schema.safeParse({ trackId: TRACK_ID, favorited: true, disliked: true })
+      schema.safeParse({ disliked: true, favorited: true, trackId: TRACK_ID })
         .success
     ).toBe(false);
-    expect(schema.safeParse({ trackId: TRACK_ID, rating: 6 }).success).toBe(
+    expect(schema.safeParse({ rating: 6, trackId: TRACK_ID }).success).toBe(
       false
     );
-    expect(schema.safeParse({ trackId: TRACK_ID, rating: 2.5 }).success).toBe(
+    expect(schema.safeParse({ rating: 2.5, trackId: TRACK_ID }).success).toBe(
       false
     );
-    expect(schema.safeParse({ trackId: TRACK_ID, rating: 0 }).success).toBe(
+    expect(schema.safeParse({ rating: 0, trackId: TRACK_ID }).success).toBe(
       true
     );
     expect(
-      schema.safeParse({ trackId: TRACK_ID, favorited: true, disliked: false })
+      schema.safeParse({ disliked: false, favorited: true, trackId: TRACK_ID })
         .success
     ).toBe(true);
   });
@@ -36,19 +36,19 @@ describe("music.update_track input", () => {
 
 describe("planTrackWrites", () => {
   test("clears the opposite flag when one is set to true", () => {
-    expect(planTrackWrites({ trackId: TRACK_ID, favorited: true })).toEqual({
-      favorited: true,
+    expect(planTrackWrites({ favorited: true, trackId: TRACK_ID })).toEqual({
       disliked: false,
+      favorited: true,
     });
-    expect(planTrackWrites({ trackId: TRACK_ID, disliked: true })).toEqual({
-      favorited: false,
+    expect(planTrackWrites({ disliked: true, trackId: TRACK_ID })).toEqual({
       disliked: true,
+      favorited: false,
     });
   });
 
   test("leaves the other flag alone when one is cleared, and maps stars to 0-100", () => {
     expect(
-      planTrackWrites({ trackId: TRACK_ID, favorited: false, rating: 4 })
+      planTrackWrites({ favorited: false, rating: 4, trackId: TRACK_ID })
     ).toEqual({
       favorited: false,
       rating: 80,
@@ -59,8 +59,8 @@ describe("planTrackWrites", () => {
 describe("buildUpdateTrackScript", () => {
   test("writes false flags before true ones, then the rating", () => {
     const script = buildUpdateTrackScript(TRACK_ID, {
-      favorited: true,
       disliked: false,
+      favorited: true,
       rating: 60,
     });
     const clear = script.indexOf("set disliked of t to false");
@@ -81,27 +81,27 @@ describe("buildUpdateTrackScript", () => {
 describe("createLibraryOperations.updateTrack", () => {
   test("reports the read-back state with the rating in rounded stars", async () => {
     const operations = createLibraryOperations(async () => ({
-      stdout: '{"found":true,"favorited":true,"disliked":false,"rating":70}',
       stderr: "",
+      stdout: '{"found":true,"favorited":true,"disliked":false,"rating":70}',
     }));
     expect(await operations.updateTrack(TRACK_ID, { favorited: true })).toEqual(
       {
-        trackId: TRACK_ID,
-        favorited: true,
         disliked: false,
+        favorited: true,
         rating: 4,
+        trackId: TRACK_ID,
       }
     );
   });
 
   test("maps an unknown track ID to not_found", async () => {
     const operations = createLibraryOperations(async () => ({
-      stdout: '{"found":false}',
       stderr: "",
+      stdout: '{"found":false}',
     }));
     const error = await operations
       .updateTrack(TRACK_ID, { rating: 20 })
-      .catch((caught: unknown) => caught);
+      .catch((error: unknown) => error);
     expect(error).toBeInstanceOf(MusicToolError);
     expect((error as MusicToolError).code).toBe("not_found");
   });

@@ -17,7 +17,7 @@ on error
     return "not_running"
 end try
 `;
-  const result = await runAppleScript(script, 2_000);
+  const result = await runAppleScript(script, 2000);
   return result.stdout === "running";
 }
 
@@ -30,18 +30,18 @@ on error errMsg number errNum
     return "error:" & errNum
 end try
 `;
-  const result = await runAppleScript(script, 5_000);
-  if (!result.stdout.startsWith("error:")) return true;
+  const result = await runAppleScript(script, 5000);
+  if (!result.stdout.startsWith("error:")) {return true;}
 
   const errorNumber = Number(result.stdout.replace("error:", ""));
-  if (errorNumber === -1743 || errorNumber === -10004) return false;
+  if (errorNumber === -1743 || errorNumber === -10_004) {return false;}
   if (
     errorNumber === -600 ||
-    errorNumber === -10810 ||
+    errorNumber === -10_810 ||
     errorNumber === -1728 ||
     errorNumber === -43
   )
-    return false;
+    {return false;}
   return true;
 }
 
@@ -53,12 +53,12 @@ async function getMusicHealth() {
     try {
       permissionGranted = await checkMusicPermission();
     } catch (error) {
-      if (!(error instanceof MusicToolError)) throw error;
+      if (!(error instanceof MusicToolError)) {throw error;}
       if (
         error.code !== "permission_denied" &&
         error.code !== "music_not_running"
       )
-        throw error;
+        {throw error;}
     }
   }
 
@@ -67,6 +67,11 @@ async function getMusicHealth() {
 
 const healthInputSchema = z.object({});
 const healthOutputSchema = z.object({
+  dryRun: z
+    .boolean()
+    .describe(
+      "True when mutation tools return previews without changing Music."
+    ),
   musicRunning: z.boolean(),
   permissionGranted: z
     .boolean()
@@ -77,21 +82,12 @@ const healthOutputSchema = z.object({
   writesEnabled: z
     .boolean()
     .describe("True when mutation tools may change Apple Music."),
-  dryRun: z
-    .boolean()
-    .describe(
-      "True when mutation tools return previews without changing Music."
-    ),
 });
 
 export const healthTool = defineTool({
-  name: "music.health",
+  annotations: READ_ONLY_ANNOTATIONS,
   description:
     "Check that Apple Music is running and that automation permission is granted. Call this first.",
-  inputSchema: healthInputSchema,
-  outputSchema: healthOutputSchema,
-  annotations: READ_ONLY_ANNOTATIONS,
-  writesRequired: false,
   async handler(_input, { config }) {
     const health = await getMusicHealth();
     const response = {
@@ -107,4 +103,8 @@ export const healthTool = defineTool({
       },
     };
   },
+  inputSchema: healthInputSchema,
+  name: "music.health",
+  outputSchema: healthOutputSchema,
+  writesRequired: false,
 });

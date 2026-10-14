@@ -9,7 +9,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { runAppleScript } from "./applescript/runner.js";
 import { createServer } from "./server.js";
 
-const INTEGRATION = process.env["INTEGRATION"] === "true";
+const INTEGRATION = process.env.INTEGRATION === "true";
 
 describe.skipIf(!INTEGRATION)("integration", () => {
   test("music.health — Music app responds", async () => {
@@ -23,7 +23,7 @@ try
 on error
     return "error"
 end try`;
-    const result = await runAppleScript(script, 5_000);
+    const result = await runAppleScript(script, 5000);
     expect(["running", "not_running"]).toContain(result.stdout);
   });
 
@@ -46,14 +46,14 @@ end tell`;
     );
     await client.connect(
       new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
-        fetch: (url, init) => handler.fetch(new Request(url, init)),
+        fetch:  async (url, init) => handler.fetch(new Request(url, init)),
       })
     );
     try {
       const nowPlaying = await client.readResource({
         uri: "music://now-playing",
       });
-      expect(nowPlaying).toMatchObject({ ttlMs: 0, cacheScope: "private" });
+      expect(nowPlaying).toMatchObject({ cacheScope: "private", ttlMs: 0 });
     } finally {
       await client.close();
       await handler.close();

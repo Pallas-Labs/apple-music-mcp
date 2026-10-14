@@ -3,12 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { MusicToolError } from "../types.js";
 import { createPlaylistEditOperations } from "./playlist-edits.js";
 
-type Info = {
+interface Info {
   kind: "user" | "folder" | "subscription" | "system";
   applied: boolean;
   name?: string;
   folderId?: string;
-};
+}
 
 function playlistPayload({
   kind,
@@ -17,14 +17,14 @@ function playlistPayload({
   folderId = "",
 }: Info): string {
   return JSON.stringify({
+    applied,
+    folderId,
     found: true,
     id: "ABCDEF1234567890",
-    name,
-    kind,
     isSmart: false,
+    kind,
+    name,
     trackCount: 12,
-    folderId,
-    applied,
   });
 }
 
@@ -32,13 +32,13 @@ function recordingRunner(stdout: string) {
   const scripts: string[] = [];
   const operations = createPlaylistEditOperations(async (script) => {
     scripts.push(script);
-    return { stdout, stderr: "" };
+    return { stderr: "", stdout };
   });
-  return { scripts, operations };
+  return { operations, scripts };
 }
 
 async function errorOf(promise: Promise<unknown>): Promise<MusicToolError> {
-  const error = await promise.catch((caught: unknown) => caught);
+  const error = await promise.catch((error: unknown) => error);
   expect(error).toBeInstanceOf(MusicToolError);
   return error as MusicToolError;
 }
@@ -47,19 +47,19 @@ describe("createPlaylistEditOperations.describe", () => {
   test("reports any kind of playlist, including ones that refuse edits", async () => {
     const { operations } = recordingRunner(
       playlistPayload({
-        kind: "folder",
         applied: false,
         folderId: "AAAA1111BBBB2222",
+        kind: "folder",
       })
     );
     expect(await operations.describe("ABCDEF1234567890")).toEqual({
-      id: "ABCDEF1234567890",
-      name: "Road Trip",
-      kind: "folder",
-      isSmart: false,
-      trackCount: 12,
-      folderId: "AAAA1111BBBB2222",
       applied: false,
+      folderId: "AAAA1111BBBB2222",
+      id: "ABCDEF1234567890",
+      isSmart: false,
+      kind: "folder",
+      name: "Road Trip",
+      trackCount: 12,
     });
   });
 });
@@ -67,7 +67,7 @@ describe("createPlaylistEditOperations.describe", () => {
 describe("createPlaylistEditOperations.delete", () => {
   test("deletes a user playlist and returns what it deleted", async () => {
     const { scripts, operations } = recordingRunner(
-      playlistPayload({ kind: "user", applied: true })
+      playlistPayload({ applied: true, kind: "user" })
     );
     const info = await operations.delete("ABCDEF1234567890");
     expect(info).toMatchObject({
@@ -82,7 +82,7 @@ describe("createPlaylistEditOperations.delete", () => {
   test("refuses folders, subscriptions, and built-in playlists", async () => {
     for (const kind of ["folder", "subscription", "system"] as const) {
       const { operations } = recordingRunner(
-        playlistPayload({ kind, applied: false })
+        playlistPayload({ applied: false, kind })
       );
       const error = await errorOf(operations.delete("ABCDEF1234567890"));
       expect(error.code).toBe("validation_error");
@@ -92,7 +92,7 @@ describe("createPlaylistEditOperations.delete", () => {
 
   test("reports script_error when Music did not apply the delete", async () => {
     const { operations } = recordingRunner(
-      playlistPayload({ kind: "user", applied: false })
+      playlistPayload({ applied: false, kind: "user" })
     );
     const error = await errorOf(operations.delete("ABCDEF1234567890"));
     expect(error.code).toBe("script_error");
@@ -103,7 +103,7 @@ describe("createPlaylistEditOperations.delete", () => {
 describe("createPlaylistEditOperations.rename", () => {
   test("escapes the new name and returns the renamed playlist", async () => {
     const { scripts, operations } = recordingRunner(
-      playlistPayload({ kind: "user", applied: true, name: 'Say "hi"\nnow' })
+      playlistPayload({ applied: true, kind: "user", name: 'Say "hi"\nnow' })
     );
     const info = await operations.rename("ABCDEF1234567890", 'Say "hi"\nnow');
     expect(info.name).toBe('Say "hi"\nnow');
@@ -112,7 +112,7 @@ describe("createPlaylistEditOperations.rename", () => {
 
   test("renames folders as well as user playlists", async () => {
     const { operations } = recordingRunner(
-      playlistPayload({ kind: "folder", applied: true, name: "New" })
+      playlistPayload({ applied: true, kind: "folder", name: "New" })
     );
     expect(await operations.rename("ABCDEF1234567890", "New")).toMatchObject({
       kind: "folder",
@@ -123,7 +123,7 @@ describe("createPlaylistEditOperations.rename", () => {
   test("refuses built-in and subscription playlists with validation_error", async () => {
     for (const kind of ["system", "subscription"] as const) {
       const { operations } = recordingRunner(
-        playlistPayload({ kind, applied: false })
+        playlistPayload({ applied: false, kind })
       );
       const error = await errorOf(operations.rename("ABCDEF1234567890", "New"));
       expect(error.code).toBe("validation_error");

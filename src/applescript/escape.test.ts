@@ -34,8 +34,8 @@ describe("escapeAppleScriptString", () => {
   });
 
   test("handles unicode", () => {
-    expect(escapeAppleScriptString("caf\u00e9 \u{1f600}")).toBe(
-      "caf\u00e9 \u{1f600}"
+    expect(escapeAppleScriptString("caf\u00E9 \u{1F600}")).toBe(
+      "caf\u00E9 \u{1F600}"
     );
   });
 
@@ -59,7 +59,7 @@ describe("toJavaScriptLiteral", () => {
   });
 
   test("escapes the U+2028 and U+2029 line terminators JSON.stringify leaves raw", () => {
-    const separators = String.fromCharCode(0x2028, 0x2029);
+    const separators = String.fromCharCode(0x20_28, 0x20_29);
     const literal = toJavaScriptLiteral(separators);
     expect(literal).toBe('"\\u2028\\u2029"');
     expect(new Function(`return ${literal};`)()).toBe(separators);

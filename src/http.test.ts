@@ -10,17 +10,17 @@ import { serveHttp } from "./http.js";
 const port = 40_000 + Math.floor(Math.random() * 20_000);
 const url = new URL(`http://127.0.0.1:${port}/mcp`);
 const server = serveHttp(port);
-afterAll(() => server.close());
+afterAll( async () => server.close());
 
-function post(headers: Record<string, string>): Promise<Response> {
+ async function post(headers: Record<string, string>): Promise<Response> {
   return fetch(url, {
-    method: "POST",
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
     headers: {
-      "content-type": "application/json",
       accept: "application/json, text/event-stream",
+      "content-type": "application/json",
       ...headers,
     },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    method: "POST",
   });
 }
 
