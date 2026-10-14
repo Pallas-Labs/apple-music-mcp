@@ -23,11 +23,13 @@ const toRequest = async (
   url: string,
   signal: AbortSignal
 ): Promise<Request> => {
+  // rawHeaders alternates names and values; Bun before 1.4 lacks headersDistinct.
   const headers = new Headers();
-  for (const [name, values] of Object.entries(req.headersDistinct)) {
-    for (const value of values ?? []) {
-      headers.append(name, value);
-    }
+  for (let index = 0; index + 1 < req.rawHeaders.length; index += 2) {
+    headers.append(
+      req.rawHeaders[index] ?? "",
+      req.rawHeaders[index + 1] ?? ""
+    );
   }
   const init: RequestInit = { headers, method: req.method ?? "GET", signal };
   if (req.method !== "GET" && req.method !== "HEAD") {
