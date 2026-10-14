@@ -3,6 +3,7 @@ import type {
   StandardSchemaWithJSON,
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
+
 import type { RuntimeConfig } from "./config.js";
 
 export const READ_ONLY_ANNOTATIONS = Object.freeze({
@@ -35,7 +36,8 @@ export const DESTRUCTIVE_WRITE_ANNOTATIONS = Object.freeze({
 
 export type ToolSchema = StandardSchemaWithJSON;
 
-export type ToolSchemaOutput<S extends ToolSchema> = StandardSchemaWithJSON.InferOutput<S>;
+export type ToolSchemaOutput<S extends ToolSchema> =
+  StandardSchemaWithJSON.InferOutput<S>;
 
 export type ToolResult<Output extends ToolSchema> = {
   structuredContent: ToolSchemaOutput<Output>;
@@ -58,23 +60,26 @@ type BaseToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = {
   inputSchema: Input;
   outputSchema: Output;
   annotations: ToolAnnotations;
-  handler: (input: Args, context: ToolContext) => Promise<ToolResult<Output> | InputRequiredResult>;
+  handler: (
+    input: Args,
+    context: ToolContext
+  ) => Promise<ToolResult<Output> | InputRequiredResult>;
 };
 
-type ReadToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = BaseToolDef<
-  Input,
-  Output,
-  Args
-> & {
+type ReadToolDef<
+  Input extends ToolSchema,
+  Output extends ToolSchema,
+  Args,
+> = BaseToolDef<Input, Output, Args> & {
   writesRequired: false;
   dryRunResult?: never;
 };
 
-type WriteToolDef<Input extends ToolSchema, Output extends ToolSchema, Args> = BaseToolDef<
-  Input,
-  Output,
-  Args
-> & {
+type WriteToolDef<
+  Input extends ToolSchema,
+  Output extends ToolSchema,
+  Args,
+> = BaseToolDef<Input, Output, Args> & {
   writesRequired: true;
   dryRunResult: (input: Args) => ToolSchemaOutput<Output>;
   /**
@@ -99,7 +104,7 @@ export type ToolDef<
 export type AnyToolDef = ToolDef<ToolSchema, ToolSchema, never>;
 
 export function defineTool<Input extends ToolSchema, Output extends ToolSchema>(
-  definition: ToolDef<Input, Output>,
+  definition: ToolDef<Input, Output>
 ): ToolDef<Input, Output> {
   return definition;
 }

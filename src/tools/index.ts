@@ -1,16 +1,21 @@
 import type { AnyToolDef } from "../tool-contracts.js";
 import { capabilitiesTool } from "./capabilities.js";
-import { healthTool } from "./health.js";
 import { listFoldersTool, createFolderTool } from "./folders.js";
+import { healthTool } from "./health.js";
+import { updateTrackTool } from "./library.js";
+import { movePlaylistTool } from "./move.js";
+import {
+  getNowPlayingTool,
+  playbackControlTool,
+  playTool,
+  setPlayerTool,
+} from "./playback.js";
+import { deletePlaylistTool, renamePlaylistTool } from "./playlist-edits.js";
 import {
   listPlaylistsTool,
   createPlaylistTool,
   createPlaylistFromCriteriaTool,
 } from "./playlists.js";
-import { movePlaylistTool } from "./move.js";
-import { deletePlaylistTool, renamePlaylistTool } from "./playlist-edits.js";
-import { getNowPlayingTool, playbackControlTool, playTool, setPlayerTool } from "./playback.js";
-import { updateTrackTool } from "./library.js";
 import { searchLibraryTool } from "./search.js";
 import {
   findTracksTool,

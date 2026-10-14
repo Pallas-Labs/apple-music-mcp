@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+
+import { MusicToolError } from "../types.js";
 import {
   runAppleScript,
   runJavaScript,
@@ -6,11 +8,12 @@ import {
   mapAppleScriptError,
 } from "./runner.js";
 import type { ExecFn } from "./runner.js";
-import { MusicToolError } from "../types.js";
 
 describe("parseAppleScriptErrorNumber", () => {
   test("returns last error number from stderr", () => {
-    expect(parseAppleScriptErrorNumber("error one (-1743) and error two (-1728)")).toBe(-1728);
+    expect(
+      parseAppleScriptErrorNumber("error one (-1743) and error two (-1728)")
+    ).toBe(-1728);
   });
 
   test("returns null when no error number is present", () => {
@@ -42,12 +45,18 @@ describe("mapAppleScriptError", () => {
   });
 
   test("maps -1743 to permission_denied", () => {
-    const mapped = mapAppleScriptError({ stderr: "execution error (-1743)", code: "1" });
+    const mapped = mapAppleScriptError({
+      stderr: "execution error (-1743)",
+      code: "1",
+    });
     expect(mapped.code).toBe("permission_denied");
   });
 
   test("maps -10004 to permission_denied", () => {
-    const mapped = mapAppleScriptError({ stderr: "execution error (-10004)", code: "1" });
+    const mapped = mapAppleScriptError({
+      stderr: "execution error (-10004)",
+      code: "1",
+    });
     expect(mapped.code).toBe("permission_denied");
   });
 
@@ -66,7 +75,8 @@ describe("mapAppleScriptError", () => {
 
   test("maps -1728 without app reference to not_found", () => {
     const mapped = mapAppleScriptError({
-      stderr: 'Can\'t get first user playlist whose persistent ID is "ABC". (-1728)',
+      stderr:
+        'Can\'t get first user playlist whose persistent ID is "ABC". (-1728)',
       code: "1",
     });
     expect(mapped.code).toBe("not_found");
@@ -82,7 +92,10 @@ describe("mapAppleScriptError", () => {
   });
 
   test("maps unknown error to script_error", () => {
-    const mapped = mapAppleScriptError({ stderr: "something weird", code: "1" });
+    const mapped = mapAppleScriptError({
+      stderr: "something weird",
+      code: "1",
+    });
     expect(mapped.code).toBe("script_error");
   });
 });
@@ -131,9 +144,11 @@ describe("runAppleScript", () => {
       err.stderr = "execution error: Error: Error: Can't get object. (-1728)";
       throw err;
     };
-    await expect(runJavaScript("script", 5000, mockExec)).rejects.toMatchObject({
-      code: "not_found",
-    });
+    await expect(runJavaScript("script", 5000, mockExec)).rejects.toMatchObject(
+      {
+        code: "not_found",
+      }
+    );
   });
 
   test("normalizes quoted scalar stdout", async () => {
@@ -143,7 +158,10 @@ describe("runAppleScript", () => {
   });
 
   test("normalizes quoted JSON-string stdout", async () => {
-    const mockExec: ExecFn = async () => ({ stdout: '"[{\\"id\\":\\"A\\"}]"', stderr: "" });
+    const mockExec: ExecFn = async () => ({
+      stdout: '"[{\\"id\\":\\"A\\"}]"',
+      stderr: "",
+    });
     const result = await runAppleScript("script", 5000, mockExec);
     expect(result.stdout).toBe('[{"id":"A"}]');
   });

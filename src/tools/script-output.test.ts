@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import type { ExecFn } from "../applescript/runner.js";
 import { MusicToolError } from "../types.js";
 import { createFolderOperations } from "./folders.js";
@@ -47,9 +48,16 @@ const CASES: Case[] = [
     after: [JSON.stringify(["", "AAAA1111BBBB2222"])],
     expected: [
       { id: "AAAA1111BBBB2222", name: "Top", isRoot: true },
-      { id: "CCCC3333DDDD4444", name: "Nested", isRoot: false, parentId: "AAAA1111BBBB2222" },
+      {
+        id: "CCCC3333DDDD4444",
+        name: "Nested",
+        isRoot: false,
+        parentId: "AAAA1111BBBB2222",
+      },
     ],
-    wrongShape: JSON.stringify([{ id: "AAAA1111BBBB2222", name: "Top", kind: "smart" }]),
+    wrongShape: JSON.stringify([
+      { id: "AAAA1111BBBB2222", name: "Top", kind: "smart" },
+    ]),
     message: "Music returned an invalid playlist payload.",
   },
   {
@@ -58,29 +66,57 @@ const CASES: Case[] = [
     before: [PLAYLIST_ENTRIES],
     valid: JSON.stringify(["", "AAAA1111BBBB2222", "CCCC3333DDDD4444"]),
     expected: [
-      { id: "CCCC3333DDDD4444", name: "Nested", isRoot: false, parentId: "AAAA1111BBBB2222" },
+      {
+        id: "CCCC3333DDDD4444",
+        name: "Nested",
+        isRoot: false,
+        parentId: "AAAA1111BBBB2222",
+      },
     ],
     wrongShape: JSON.stringify(["", "AAAA1111BBBB2222"]),
     message: "Music returned an invalid playlist parent payload.",
   },
   {
     name: "music.create_folder",
-    run: (execFn) => createFolderOperations(execFn).createFolder({ name: "Top" }),
-    valid: JSON.stringify({ id: "AAAA1111BBBB2222", name: "Top", parentId: "" }),
+    run: (execFn) =>
+      createFolderOperations(execFn).createFolder({ name: "Top" }),
+    valid: JSON.stringify({
+      id: "AAAA1111BBBB2222",
+      name: "Top",
+      parentId: "",
+    }),
     expected: { id: "AAAA1111BBBB2222", name: "Top", isRoot: true },
-    wrongShape: JSON.stringify({ id: "AAAA1111BBBB2222", name: 7, parentId: "" }),
+    wrongShape: JSON.stringify({
+      id: "AAAA1111BBBB2222",
+      name: 7,
+      parentId: "",
+    }),
     message: "Music returned an invalid create folder payload.",
   },
   {
     name: "music.search_library",
     run: (execFn) => createSearchOperations(execFn).searchLibrary("love", 5),
     valid: JSON.stringify([
-      { id: "AAAABBBBCCCCDDDD", name: "Song", artist: "Artist", album: "Album", duration: 201.5 },
+      {
+        id: "AAAABBBBCCCCDDDD",
+        name: "Song",
+        artist: "Artist",
+        album: "Album",
+        duration: 201.5,
+      },
     ]),
     expected: [
-      { id: "AAAABBBBCCCCDDDD", name: "Song", artist: "Artist", album: "Album", duration: 201.5 },
+      {
+        id: "AAAABBBBCCCCDDDD",
+        name: "Song",
+        artist: "Artist",
+        album: "Album",
+        duration: 201.5,
+      },
     ],
-    wrongShape: JSON.stringify([{ id: "AAAABBBBCCCCDDDD", name: "Song", duration: "3:21" }]),
+    wrongShape: JSON.stringify([
+      { id: "AAAABBBBCCCCDDDD", name: "Song", duration: "3:21" },
+    ]),
     message: "Music returned an invalid search payload.",
   },
   {
@@ -107,16 +143,29 @@ const CASES: Case[] = [
     valid: PLAYLIST_ENTRIES,
     after: [JSON.stringify(["AAAA1111BBBB2222"])],
     expected: [
-      { id: "ABCDEF1234567890", name: "Road Trip", isSmart: false, folderId: "AAAA1111BBBB2222" },
+      {
+        id: "ABCDEF1234567890",
+        name: "Road Trip",
+        isSmart: false,
+        folderId: "AAAA1111BBBB2222",
+      },
     ],
-    wrongShape: JSON.stringify([{ id: "ABCDEF1234567890", name: "Road Trip", kind: "user" }]),
+    wrongShape: JSON.stringify([
+      { id: "ABCDEF1234567890", name: "Road Trip", kind: "user" },
+    ]),
     message: "Music returned an invalid playlist payload.",
   },
   {
     name: "music.create_playlist",
-    run: (execFn) => createPlaylistOperations(execFn).createPlaylist({ name: "Road Trip" }),
+    run: (execFn) =>
+      createPlaylistOperations(execFn).createPlaylist({ name: "Road Trip" }),
     valid: JSON.stringify({ ...PLAYLIST_ROW, trackCount: 0 }),
-    expected: { id: "ABCDEF1234567890", name: "Road Trip", isSmart: false, trackCount: 0 },
+    expected: {
+      id: "ABCDEF1234567890",
+      name: "Road Trip",
+      isSmart: false,
+      trackCount: 0,
+    },
     wrongShape: JSON.stringify({ id: "ABCDEF1234567890", name: "Road Trip" }),
     message: "Music returned an invalid create playlist payload.",
   },
@@ -152,7 +201,11 @@ const CASES: Case[] = [
   {
     name: "music.playback_control",
     run: (execFn) => createPlaybackOperations(execFn).controlPlayback("pause"),
-    valid: JSON.stringify({ success: true, action: "pause", playerState: "paused" }),
+    valid: JSON.stringify({
+      success: true,
+      action: "pause",
+      playerState: "paused",
+    }),
     expected: { success: true, action: "pause", playerState: "paused" },
     wrongShape: JSON.stringify({ success: true, action: "pause" }),
     message: "Music returned an invalid playback control payload.",
@@ -177,12 +230,16 @@ describe("script output validation", () => {
     message,
   } of CASES) {
     test(`${name} accepts a well-formed payload`, async () => {
-      expect(await run(scriptedRunner(...before, valid, ...after))).toEqual(expected);
+      expect(await run(scriptedRunner(...before, valid, ...after))).toEqual(
+        expected
+      );
     });
 
     test(`${name} rejects malformed payloads with script_error`, async () => {
       for (const payload of ["not json", "", wrongShape]) {
-        const error = await errorOf(run(scriptedRunner(...before, payload, ...after)));
+        const error = await errorOf(
+          run(scriptedRunner(...before, payload, ...after))
+        );
         expect(error.code).toBe("script_error");
         expect(error.message).toBe(message);
       }

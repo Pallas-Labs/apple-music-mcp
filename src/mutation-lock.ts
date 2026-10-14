@@ -5,7 +5,7 @@ export function withMutationLock<T>(operation: () => Promise<T>): Promise<T> {
   const next = mutationQueue.then(operation, operation);
   mutationQueue = next.then(
     () => undefined,
-    () => undefined,
+    () => undefined
   );
   return next;
 }

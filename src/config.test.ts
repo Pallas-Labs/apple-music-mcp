@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+
 import { readBooleanEnv, SERVER_VERSION } from "./config.js";
 
 describe("readBooleanEnv", () => {
@@ -60,7 +61,7 @@ describe("readBooleanEnv", () => {
 describe("SERVER_VERSION", () => {
   test("matches package.json version", () => {
     const packageJson = JSON.parse(
-      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+      readFileSync(new URL("../package.json", import.meta.url), "utf8")
     ) as {
       version: string;
     };

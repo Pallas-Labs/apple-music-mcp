@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+
 import { MusicToolError } from "../types.js";
 
 const execFileAsync = promisify(execFile);
@@ -38,13 +39,15 @@ export type ScriptLanguage = "AppleScript" | "JavaScript";
 export type ExecFn = (
   script: string,
   timeoutMs: number,
-  language: ScriptLanguage,
+  language: ScriptLanguage
 ) => Promise<AppleScriptExecResult>;
 
 const defaultExecFn: ExecFn = async (script, timeoutMs, language) => {
   // JXA prints its string result raw, so it skips the source-form quoting AppleScript needs.
   const languageArgs =
-    language === "JavaScript" ? ["-l", "JavaScript", "-e", script] : ["-s", "s", "-e", script];
+    language === "JavaScript"
+      ? ["-l", "JavaScript", "-e", script]
+      : ["-s", "s", "-e", script];
   const { stdout, stderr } = await execFileAsync("osascript", languageArgs, {
     encoding: "utf8",
     timeout: timeoutMs,
@@ -66,27 +69,35 @@ export function parseAppleScriptErrorNumber(stderr: string): number | null {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-export function mapAppleScriptError(error: AppleScriptExecError): MusicToolError {
+export function mapAppleScriptError(
+  error: AppleScriptExecError
+): MusicToolError {
   const stderr = (error.stderr ?? "").trim();
   const errorNumber = parseAppleScriptErrorNumber(stderr);
 
   if (error.code === "ETIMEDOUT" || error.signal === "SIGTERM") {
-    return new MusicToolError("timeout", "AppleScript command timed out", { stderr });
+    return new MusicToolError("timeout", "AppleScript command timed out", {
+      stderr,
+    });
   }
 
   if (errorNumber === -1743 || errorNumber === -10004) {
     return new MusicToolError(
       "permission_denied",
       "Permission denied to control Music. Grant automation access in System Settings > Privacy & Security > Automation.",
-      { stderr, errorNumber },
+      { stderr, errorNumber }
     );
   }
 
   if (errorNumber === -600 || errorNumber === -10810) {
-    return new MusicToolError("music_not_running", "Music app is not running or unavailable.", {
-      stderr,
-      errorNumber,
-    });
+    return new MusicToolError(
+      "music_not_running",
+      "Music app is not running or unavailable.",
+      {
+        stderr,
+        errorNumber,
+      }
+    );
   }
 
   if (errorNumber === -1728) {
@@ -94,12 +105,19 @@ export function mapAppleScriptError(error: AppleScriptExecError): MusicToolError
       stderr.includes('Can\'t get application id "com.apple.Music"') ||
       stderr.includes('Can\'t get application "Music"')
     ) {
-      return new MusicToolError("music_not_running", "Music app is not running or unavailable.", {
-        stderr,
-        errorNumber,
-      });
+      return new MusicToolError(
+        "music_not_running",
+        "Music app is not running or unavailable.",
+        {
+          stderr,
+          errorNumber,
+        }
+      );
     }
-    return new MusicToolError("not_found", "Music entity not found.", { stderr, errorNumber });
+    return new MusicToolError("not_found", "Music entity not found.", {
+      stderr,
+      errorNumber,
+    });
   }
 
   return new MusicToolError("script_error", "Failed to execute AppleScript.", {
@@ -113,7 +131,7 @@ async function runScript(
   script: string,
   timeoutMs: number,
   language: ScriptLanguage,
-  execFn: ExecFn,
+  execFn: ExecFn
 ): Promise<AppleScriptExecResult> {
   try {
     const result = await execFn(script, timeoutMs, language);
@@ -129,7 +147,7 @@ async function runScript(
 export function runAppleScript(
   script: string,
   timeoutMs = 15_000,
-  execFn: ExecFn = defaultExecFn,
+  execFn: ExecFn = defaultExecFn
 ): Promise<AppleScriptExecResult> {
   return runScript(script, timeoutMs, "AppleScript", execFn);
 }
@@ -138,7 +156,7 @@ export function runAppleScript(
 export function runJavaScript(
   script: string,
   timeoutMs = 15_000,
-  execFn: ExecFn = defaultExecFn,
+  execFn: ExecFn = defaultExecFn
 ): Promise<AppleScriptExecResult> {
   return runScript(script, timeoutMs, "JavaScript", execFn);
 }

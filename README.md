@@ -1,62 +1,45 @@
 # apple-music-mcp
 
-[![npm](https://img.shields.io/npm/v/%40pallas--labs%2Fapple-music-mcp)](https://www.npmjs.com/package/@pallas-labs/apple-music-mcp)
-[![macOS only](https://img.shields.io/badge/platform-macOS-lightgrey)](https://github.com/parthmangrola/apple-music-mcp)
-[![MIT License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/%40pallas--labs%2Fapple-music-mcp)](https://www.npmjs.com/package/@pallas-labs/apple-music-mcp) [![macOS only](https://img.shields.io/badge/platform-macOS-lightgrey)](https://github.com/parthmangrola/apple-music-mcp) [![MIT License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 MCP server for controlling Apple Music on macOS via AppleScript. Implements MCP 2026-07-28 and remains compatible with initialization-based 2025 clients over stdio. Works with Claude Code, Codex CLI, Cursor, OpenCode, and other MCP clients.
 
 ## Tools
 
-| Tool                                  | Description                                         | Read/Write |
-| ------------------------------------- | --------------------------------------------------- | ---------- |
-| `music.capabilities`                  | Report server capabilities and runtime flags        | Read       |
-| `music.health`                        | Check Music availability and automation permissions | Read       |
-| `music.list_folders`                  | List folder playlists                               | Read       |
-| `music.list_playlists`                | List user playlists, optionally filtered by folder  | Read       |
-| `music.get_now_playing`               | Get current track info and player state             | Read       |
-| `music.search_library`                | Search library tracks by name/artist                | Read       |
-| `music.find_tracks`                   | Find library tracks by text, year, or play count    | Read       |
-| `music.get_playlist_tracks`           | Get tracks in a playlist (paginated)                | Read       |
-| `music.create_playlist`               | Create a playlist, optionally in a folder           | Write      |
-| `music.create_playlist_from_criteria` | Create a playlist from a bounded criteria match     | Write      |
-| `music.create_folder`                 | Create a folder playlist, optionally nested         | Write      |
-| `music.move_playlist`                 | Move a playlist into a folder                       | Write      |
-| `music.rename_playlist`               | Rename a user playlist or folder                    | Write      |
-| `music.delete_playlist`               | Delete a user playlist after the user confirms      | Write      |
-| `music.playback_control`              | Play, pause, next, previous, toggle                 | Write      |
-| `music.play`                          | Play a playlist or track, optionally shuffled       | Write      |
-| `music.set_player`                    | Set volume, shuffle, repeat, or position            | Write      |
-| `music.add_tracks_to_playlist`        | Add unique track IDs with per-ID outcomes           | Write      |
-| `music.remove_tracks_from_playlist`   | Remove every instance of each unique track ID       | Write      |
-| `music.update_track`                  | Set a track's favorite, dislike, or star rating     | Write      |
+| Tool | Description | Read/Write |
+| --- | --- | --- |
+| `music.capabilities` | Report server capabilities and runtime flags | Read |
+| `music.health` | Check Music availability and automation permissions | Read |
+| `music.list_folders` | List folder playlists | Read |
+| `music.list_playlists` | List user playlists, optionally filtered by folder | Read |
+| `music.get_now_playing` | Get current track info and player state | Read |
+| `music.search_library` | Search library tracks by name/artist | Read |
+| `music.find_tracks` | Find library tracks by text, year, or play count | Read |
+| `music.get_playlist_tracks` | Get tracks in a playlist (paginated) | Read |
+| `music.create_playlist` | Create a playlist, optionally in a folder | Write |
+| `music.create_playlist_from_criteria` | Create a playlist from a bounded criteria match | Write |
+| `music.create_folder` | Create a folder playlist, optionally nested | Write |
+| `music.move_playlist` | Move a playlist into a folder | Write |
+| `music.rename_playlist` | Rename a user playlist or folder | Write |
+| `music.delete_playlist` | Delete a user playlist after the user confirms | Write |
+| `music.playback_control` | Play, pause, next, previous, toggle | Write |
+| `music.play` | Play a playlist or track, optionally shuffled | Write |
+| `music.set_player` | Set volume, shuffle, repeat, or position | Write |
+| `music.add_tracks_to_playlist` | Add unique track IDs with per-ID outcomes | Write |
+| `music.remove_tracks_from_playlist` | Remove every instance of each unique track ID | Write |
+| `music.update_track` | Set a track's favorite, dislike, or star rating | Write |
 
 ### Playlist deletion
 
-`music.delete_playlist` deletes one user playlist; the tracks stay in the library. It refuses
-folders, because deleting a folder also deletes every playlist in it, and it refuses built-in
-and Apple Music playlists. If the client supports elicitation, the server always asks the user
-to confirm and names the playlist and its track count. Other clients must pass `confirm: true`,
-and should do so only after the user approves. A declined or cancelled prompt deletes nothing.
+`music.delete_playlist` deletes one user playlist; the tracks stay in the library. It refuses folders, because deleting a folder also deletes every playlist in it, and it refuses built-in and Apple Music playlists. If the client supports elicitation, the server always asks the user to confirm and names the playlist and its track count. Other clients must pass `confirm: true`, and should do so only after the user approves. A declined or cancelled prompt deletes nothing.
 
 ### Track matching and bulk mutation results
 
-`music.find_tracks` requires at least one text or numeric filter. Music applies the most
-selective filter across the whole library, the server reads the candidates in bulk and applies
-the remaining filters, then sorts and limits. It returns `tracks`, `totalMatched`, `limit`,
-`scanned`, and `truncated`. `scanned` is the number of candidates Music returned, capped at
-50,000 for memory safety. `truncated` is `true` only when that cap was hit; then `totalMatched`
-is a lower bound, not a full-library total. `music.create_playlist_from_criteria` reports the
-same `scanned` and `truncated` values; its `matched` field has the same lower-bound rule.
+`music.find_tracks` requires at least one text or numeric filter. Music applies the most selective filter across the whole library, the server reads the candidates in bulk and applies the remaining filters, then sorts and limits. It returns `tracks`, `totalMatched`, `limit`, `scanned`, and `truncated`. `scanned` is the number of candidates Music returned, capped at 50,000 for memory safety. `truncated` is `true` only when that cap was hit; then `totalMatched` is a lower bound, not a full-library total. `music.create_playlist_from_criteria` reports the same `scanned` and `truncated` values; its `matched` field has the same lower-bound rule.
 
-Add and remove requests reject duplicate track IDs. Add results contain `playlistId`,
-`requested`, `added`, `addedTrackIds`, `missingTrackIds`, and `failedTrackIds`. A missing ID
-was not found in the library; a failed ID was found but could not be duplicated.
+Add and remove requests reject duplicate track IDs. Add results contain `playlistId`, `requested`, `added`, `addedTrackIds`, `missingTrackIds`, and `failedTrackIds`. A missing ID was not found in the library; a failed ID was found but could not be duplicated.
 
-Remove results contain `playlistId`, `requested`, `removed`, `removedTrackIds`,
-`missingTrackIds`, and `failedTrackIds`. Removal deletes every matching playlist instance, so
-`removed` can exceed `removedTrackIds.length`. Criteria-created playlists also report
-`requested`, `addedTrackIds`, `missingTrackIds`, and `failedTrackIds`.
+Remove results contain `playlistId`, `requested`, `removed`, `removedTrackIds`, `missingTrackIds`, and `failedTrackIds`. Removal deletes every matching playlist instance, so `removed` can exceed `removedTrackIds.length`. Criteria-created playlists also report `requested`, `addedTrackIds`, `missingTrackIds`, and `failedTrackIds`.
 
 ## Resources and prompts
 
@@ -72,11 +55,11 @@ It also provides two user-invoked prompts:
 
 ## Environment Variables
 
-| Variable                        | Default | Description                                                             |
-| ------------------------------- | ------- | ----------------------------------------------------------------------- |
-| `APPLE_MUSIC_MCP_ENABLE_WRITES` | `false` | Enable every Write tool in the table above                              |
-| `APPLE_MUSIC_MCP_DRY_RUN`       | `false` | Mutation tools return dry-run payloads without modifying Music          |
-| `APPLE_MUSIC_MCP_HTTP_PORT`     | unset   | Serve Streamable HTTP at `http://127.0.0.1:<port>/mcp` instead of stdio |
+| Variable | Default | Description |
+| --- | --- | --- |
+| `APPLE_MUSIC_MCP_ENABLE_WRITES` | `false` | Enable every Write tool in the table above |
+| `APPLE_MUSIC_MCP_DRY_RUN` | `false` | Mutation tools return dry-run payloads without modifying Music |
+| `APPLE_MUSIC_MCP_HTTP_PORT` | unset | Serve Streamable HTTP at `http://127.0.0.1:<port>/mcp` instead of stdio |
 
 ## Setup (Recommended)
 
@@ -175,23 +158,17 @@ Add to `opencode.json`:
 }
 ```
 
-OpenCode runs MCP servers in Code Mode by default, and this server works with it. Use the key
-`apple_music` with an underscore. Scripts then call tools such as
-`tools.apple_music.music_find_tracks(...)`, and prompts appear as `/apple_music:curate-playlist`.
+OpenCode runs MCP servers in Code Mode by default, and this server works with it. Use the key `apple_music` with an underscore. Scripts then call tools such as `tools.apple_music.music_find_tracks(...)`, and prompts appear as `/apple_music:curate-playlist`.
 
 ### Executor and other HTTP clients
 
-Clients that connect by URL, such as the Executor 2 desktop app, need the HTTP mode. Start the
-server with a port:
+Clients that connect by URL, such as the Executor 2 desktop app, need the HTTP mode. Start the server with a port:
 
 ```bash
 APPLE_MUSIC_MCP_HTTP_PORT=4319 npx -y @pallas-labs/apple-music-mcp
 ```
 
-In Executor, select **Add app**, add a custom MCP server, and enter `http://127.0.0.1:4319/mcp`.
-The server listens only on 127.0.0.1, accepts only `localhost` and `127.0.0.1` Host headers, and
-refuses requests that carry an `Origin` header, so web pages cannot call it. To keep it running
-after you log out and in, run it from a launchd agent.
+In Executor, select **Add app**, add a custom MCP server, and enter `http://127.0.0.1:4319/mcp`. The server listens only on 127.0.0.1, accepts only `localhost` and `127.0.0.1` Host headers, and refuses requests that carry an `Origin` header, so web pages cannot call it. To keep it running after you log out and in, run it from a launchd agent.
 
 ### Hardened Read-Only (Codex)
 
@@ -253,23 +230,13 @@ INTEGRATION=true bun test src
 
 ## Troubleshooting
 
-**"Music app is not running or unavailable"**
-The server auto-launches Music. If it fails, open Music manually first.
+**"Music app is not running or unavailable"** The server auto-launches Music. If it fails, open Music manually first.
 
-**"Permission denied to control Music"**
-See the [Permissions](#permissions) section above.
+**"Permission denied to control Music"** See the [Permissions](#permissions) section above.
 
-**"AppleScript command timed out"**
-Large libraries can be slow. Track discovery usually finishes in a few seconds because Music
-filters the library and the server reads matches in bulk, but it allows up to 120 seconds for
-very large libraries. Playlist listing allows up to 70 seconds. In Codex, set
-`tool_timeout_sec = 130` for this server. If you still hit timeouts, run `music.health` first to
-warm up the connection.
+**"AppleScript command timed out"** Large libraries can be slow. Track discovery usually finishes in a few seconds because Music filters the library and the server reads matches in bulk, but it allows up to 120 seconds for very large libraries. Playlist listing allows up to 70 seconds. In Codex, set `tool_timeout_sec = 130` for this server. If you still hit timeouts, run `music.health` first to warm up the connection.
 
-**Mutations are non-atomic**
-AppleScript doesn't support transactions. Bulk operations may partially succeed. Inspect the
-returned added/removed, missing, and failed ID arrays instead of assuming the full request
-completed.
+**Mutations are non-atomic** AppleScript doesn't support transactions. Bulk operations may partially succeed. Inspect the returned added/removed, missing, and failed ID arrays instead of assuming the full request completed.
 
 ## License
 

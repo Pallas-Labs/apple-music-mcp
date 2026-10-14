@@ -13,5 +13,7 @@ export function escapeAppleScriptString(value: string): string {
  * quotes, backslashes, and control characters but leaves the U+2028/U+2029 line terminators raw.
  */
 export function toJavaScriptLiteral(value: unknown): string {
-  return JSON.stringify(value).replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029");
+  return JSON.stringify(value)
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
 }

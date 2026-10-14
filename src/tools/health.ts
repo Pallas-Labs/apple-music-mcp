@@ -1,8 +1,9 @@
 import * as z from "zod/v4";
-import { SERVER_VERSION } from "../config.js";
+
 import { runAppleScript } from "../applescript/runner.js";
-import { MusicToolError } from "../types.js";
+import { SERVER_VERSION } from "../config.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
+import { MusicToolError } from "../types.js";
 
 async function isMusicRunning(): Promise<boolean> {
   const script = `
@@ -53,7 +54,11 @@ async function getMusicHealth() {
       permissionGranted = await checkMusicPermission();
     } catch (error) {
       if (!(error instanceof MusicToolError)) throw error;
-      if (error.code !== "permission_denied" && error.code !== "music_not_running") throw error;
+      if (
+        error.code !== "permission_denied" &&
+        error.code !== "music_not_running"
+      )
+        throw error;
     }
   }
 
@@ -66,11 +71,17 @@ const healthOutputSchema = z.object({
   permissionGranted: z
     .boolean()
     .describe(
-      "True when macOS lets this process automate Music. Always false if Music is not running.",
+      "True when macOS lets this process automate Music. Always false if Music is not running."
     ),
   serverVersion: z.string(),
-  writesEnabled: z.boolean().describe("True when mutation tools may change Apple Music."),
-  dryRun: z.boolean().describe("True when mutation tools return previews without changing Music."),
+  writesEnabled: z
+    .boolean()
+    .describe("True when mutation tools may change Apple Music."),
+  dryRun: z
+    .boolean()
+    .describe(
+      "True when mutation tools return previews without changing Music."
+    ),
 });
 
 export const healthTool = defineTool({
@@ -90,7 +101,10 @@ export const healthTool = defineTool({
     };
     return {
       structuredContent: response,
-      logData: { musicRunning: health.musicRunning, permissionGranted: health.permissionGranted },
+      logData: {
+        musicRunning: health.musicRunning,
+        permissionGranted: health.permissionGranted,
+      },
     };
   },
 });

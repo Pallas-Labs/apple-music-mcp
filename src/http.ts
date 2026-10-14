@@ -1,12 +1,17 @@
-import { createServer as createHttpServer, type IncomingMessage } from "node:http";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+} from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+
 import {
   createMcpHandler,
   hostHeaderValidationResponse,
   localhostAllowedHostnames,
 } from "@modelcontextprotocol/server";
+
 import { createServer } from "./server.js";
 
 const HOST = "127.0.0.1";
@@ -29,12 +34,14 @@ export function serveHttp(port: number): { close: () => Promise<void> } {
         ? new Response("Not found", { status: 404 })
         : request.headers.has("origin")
           ? new Response("Browser requests are not allowed", { status: 403 })
-          : (hostHeaderValidationResponse(request, allowedHosts) ?? (await handler.fetch(request)));
+          : (hostHeaderValidationResponse(request, allowedHosts) ??
+            (await handler.fetch(request)));
     res.writeHead(response.status, Object.fromEntries(response.headers));
     if (response.body) {
-      await pipeline(Readable.fromWeb(response.body as NodeReadableStream), res).catch(
-        () => undefined,
-      );
+      await pipeline(
+        Readable.fromWeb(response.body as NodeReadableStream),
+        res
+      ).catch(() => undefined);
     } else {
       res.end();
     }
@@ -59,6 +66,8 @@ function toRequest(req: IncomingMessage, signal: AbortSignal): Request {
     method: req.method ?? "GET",
     headers,
     signal,
-    ...(hasBody ? { body: Readable.toWeb(req) as ReadableStream, duplex: "half" } : {}),
+    ...(hasBody
+      ? { body: Readable.toWeb(req) as ReadableStream, duplex: "half" }
+      : {}),
   });
 }
