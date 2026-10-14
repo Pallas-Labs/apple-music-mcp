@@ -1,5 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
+import type { Mock } from "bun:test";
 
+import type { ExecFn } from "../applescript/runner.js";
 import { MusicToolError } from "../types.js";
 import {
   createPlaybackOperations,
@@ -7,20 +9,24 @@ import {
   setPlayerTool,
 } from "./playback.js";
 
-function recordingRunner(stdout: string) {
-  const scripts: string[] = [];
-  const run = async (script: string) => {
-    scripts.push(script);
-    return { stderr: "", stdout };
-  };
-  return { operations: createPlaybackOperations(run), scripts };
-}
+const recordingRunner = (stdout: string) => {
+  const run = mock<ExecFn>().mockResolvedValue({ stderr: "", stdout });
+  return { operations: createPlaybackOperations(run), run };
+};
 
-async function errorOf(promise: Promise<unknown>): Promise<MusicToolError> {
-  const error = await promise.catch((error: unknown) => error);
-  expect(error).toBeInstanceOf(MusicToolError);
-  return error as MusicToolError;
-}
+const firstScript = (run: Mock<ExecFn>): string => run.mock.calls[0]?.[0] ?? "";
+
+const errorOf = async <T>(promise: Promise<T>): Promise<MusicToolError> => {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof MusicToolError) {
+      return error;
+    }
+    throw error;
+  }
+  throw new Error("Expected the promise to reject with a MusicToolError.");
+};
 
 const TRACK = {
   album: "Album",
@@ -56,18 +62,21 @@ describe("music.play input", () => {
 describe("createPlaybackOperations.play", () => {
   test("reports the player state and the track now playing", async () => {
     const { operations } = recordingRunner(PLAYING_PAYLOAD);
-    for (const kind of ["playlist", "track"] as const) {
-      expect(await operations.play({ id: "ABCDEF1234567890", kind })).toEqual({
-        playerState: "playing",
-        track: TRACK,
-      });
-    }
+    const results = await Promise.all(
+      (["playlist", "track"] as const).map(
+        async (kind) => await operations.play({ id: "ABCDEF1234567890", kind })
+      )
+    );
+    expect(results).toEqual([
+      { playerState: "playing", track: TRACK },
+      { playerState: "playing", track: TRACK },
+    ]);
   });
 
   test("sets shuffle before it starts playback", async () => {
-    const { scripts, operations } = recordingRunner(PLAYING_PAYLOAD);
+    const { run, operations } = recordingRunner(PLAYING_PAYLOAD);
     await operations.play({ id: "AAAABBBBCCCCDDDD", kind: "track" }, true);
-    const script = scripts[0] ?? "";
+    const script = firstScript(run);
     expect(script.indexOf("set shuffle enabled to true")).toBeGreaterThan(-1);
     expect(script.indexOf("set shuffle enabled to true")).toBeLessThan(
       script.indexOf("play (item 1 of matches)")
@@ -75,12 +84,12 @@ describe("createPlaybackOperations.play", () => {
   });
 
   test("escapes the ID it interpolates", async () => {
-    const { scripts, operations } = recordingRunner(PLAYING_PAYLOAD);
+    const { run, operations } = recordingRunner(PLAYING_PAYLOAD);
     await operations.play({
       id: 'X" & (do shell script "id") & "',
       kind: "playlist",
     });
-    expect(scripts[0]).toContain(
+    expect(firstScript(run)).toContain(
       'persistent ID is "X\\" & (do shell script \\"id\\") & \\""'
     );
   });
@@ -132,7 +141,7 @@ describe("createPlaybackOperations.setPlayer", () => {
   });
 
   test("refuses a seek while stopped, checking before it writes anything", async () => {
-    const { scripts, operations } = recordingRunner('{"ok":false}');
+    const { run, operations } = recordingRunner('{"ok":false}');
     const error = await errorOf(
       operations.setPlayer({ position: 30, volume: 10 })
     );
@@ -140,7 +149,7 @@ describe("createPlaybackOperations.setPlayer", () => {
     expect(error.message).toBe(
       "The player is stopped, so there is no track to seek in. Start playback first."
     );
-    const script = scripts[0] ?? "";
+    const script = firstScript(run);
     expect(script.indexOf('"stopped" then return')).toBeGreaterThan(-1);
     expect(script.indexOf('"stopped" then return')).toBeLessThan(
       script.indexOf("set sound volume to 10")

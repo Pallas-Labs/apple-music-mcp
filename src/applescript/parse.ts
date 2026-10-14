@@ -2,11 +2,11 @@ import type * as z from "zod/v4";
 
 import { MusicToolError } from "../types.js";
 
-export function parseAppleScriptJson<Schema extends z.ZodType>(
+export const parseAppleScriptJson = <Schema extends z.ZodType>(
   stdout: string,
   schema: Schema,
   invalidPayloadMessage: string
-): z.output<Schema> {
+): z.output<Schema> => {
   try {
     return schema.parse(JSON.parse(stdout));
   } catch {
@@ -14,4 +14,4 @@ export function parseAppleScriptJson<Schema extends z.ZodType>(
       outputLength: stdout.length,
     });
   }
-}
+};

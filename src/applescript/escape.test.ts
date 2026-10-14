@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { runInThisContext } from "node:vm";
 
 import { escapeAppleScriptString, toJavaScriptLiteral } from "./escape.js";
 
@@ -53,15 +54,15 @@ describe("escapeAppleScriptString", () => {
 describe("toJavaScriptLiteral", () => {
   test("keeps quotes and backslashes inside the string literal", () => {
     const literal = toJavaScriptLiteral({ name: { _contains: 'a"b\\c' } });
-    expect(new Function(`return ${literal};`)()).toEqual({
+    expect(runInThisContext(`(${literal})`)).toEqual({
       name: { _contains: 'a"b\\c' },
     });
   });
 
   test("escapes the U+2028 and U+2029 line terminators JSON.stringify leaves raw", () => {
-    const separators = String.fromCharCode(0x20_28, 0x20_29);
+    const separators = String.fromCodePoint(0x20_28, 0x20_29);
     const literal = toJavaScriptLiteral(separators);
     expect(literal).toBe('"\\u2028\\u2029"');
-    expect(new Function(`return ${literal};`)()).toBe(separators);
+    expect(runInThisContext(`(${literal})`)).toBe(separators);
   });
 });

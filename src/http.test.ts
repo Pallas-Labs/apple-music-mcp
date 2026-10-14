@@ -10,11 +10,13 @@ import { serveHttp } from "./http.js";
 const port = 40_000 + Math.floor(Math.random() * 20_000);
 const url = new URL(`http://127.0.0.1:${port}/mcp`);
 const server = serveHttp(port);
-afterAll(async () => server.close());
+afterAll(async () => {
+  await server.close();
+});
 
-async function post(headers: Record<string, string>): Promise<Response> {
-  return fetch(url, {
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+const post = async (headers: Record<string, string>): Promise<Response> =>
+  await fetch(url, {
+    body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "ping" }),
     headers: {
       accept: "application/json, text/event-stream",
       "content-type": "application/json",
@@ -22,7 +24,6 @@ async function post(headers: Record<string, string>): Promise<Response> {
     },
     method: "POST",
   });
-}
 
 describe("HTTP transport", () => {
   for (const mode of ["legacy", "auto"] as const) {
@@ -42,11 +43,14 @@ describe("HTTP transport", () => {
   }
 
   test("refuses browser requests and foreign Host headers", async () => {
-    expect((await post({ origin: "https://example.com" })).status).toBe(403);
-    expect((await post({ host: `example.com:${port}` })).status).toBe(403);
+    const browser = await post({ origin: "https://example.com" });
+    expect(browser.status).toBe(403);
+    const foreignHost = await post({ host: `example.com:${port}` });
+    expect(foreignHost.status).toBe(403);
   });
 
   test("serves only the /mcp path", async () => {
-    expect((await fetch(new URL("/other", url))).status).toBe(404);
+    const response = await fetch(new URL("/other", url));
+    expect(response.status).toBe(404);
   });
 });

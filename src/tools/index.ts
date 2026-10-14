@@ -24,28 +24,30 @@ import {
   removeTracksFromPlaylistTool,
 } from "./tracks.js";
 
+export { capabilitiesTool } from "./capabilities.js";
+export { listFoldersTool, createFolderTool } from "./folders.js";
+export { healthTool } from "./health.js";
+export { updateTrackTool } from "./library.js";
+export { movePlaylistTool } from "./move.js";
 export {
-  capabilitiesTool,
-  healthTool,
-  listFoldersTool,
-  createFolderTool,
-  listPlaylistsTool,
-  createPlaylistTool,
-  createPlaylistFromCriteriaTool,
-  movePlaylistTool,
-  renamePlaylistTool,
-  deletePlaylistTool,
   getNowPlayingTool,
   playbackControlTool,
   playTool,
   setPlayerTool,
-  searchLibraryTool,
+} from "./playback.js";
+export { deletePlaylistTool, renamePlaylistTool } from "./playlist-edits.js";
+export {
+  listPlaylistsTool,
+  createPlaylistTool,
+  createPlaylistFromCriteriaTool,
+} from "./playlists.js";
+export { searchLibraryTool } from "./search.js";
+export {
   findTracksTool,
   getPlaylistTracksTool,
   addTracksToPlaylistTool,
   removeTracksFromPlaylistTool,
-  updateTrackTool,
-};
+} from "./tracks.js";
 
 export const allTools: readonly AnyToolDef[] = [
   capabilitiesTool,

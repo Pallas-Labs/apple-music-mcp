@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
+import type { ExecFn } from "../applescript/runner.js";
 import { MusicToolError } from "../types.js";
 import {
   buildUpdateTrackScript,
@@ -9,6 +10,21 @@ import {
 } from "./library.js";
 
 const TRACK_ID = "AAAABBBBCCCCDDDD";
+
+const execReturning = (stdout: string) =>
+  mock<ExecFn>().mockResolvedValue({ stderr: "", stdout });
+
+const errorOf = async <T>(promise: Promise<T>): Promise<MusicToolError> => {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof MusicToolError) {
+      return error;
+    }
+    throw error;
+  }
+  throw new Error("Expected the promise to reject with a MusicToolError.");
+};
 
 describe("music.update_track input", () => {
   test("requires a change and rejects contradictory or out-of-range values", () => {
@@ -80,10 +96,11 @@ describe("buildUpdateTrackScript", () => {
 
 describe("createLibraryOperations.updateTrack", () => {
   test("reports the read-back state with the rating in rounded stars", async () => {
-    const operations = createLibraryOperations(async () => ({
-      stderr: "",
-      stdout: '{"found":true,"favorited":true,"disliked":false,"rating":70}',
-    }));
+    const operations = createLibraryOperations(
+      execReturning(
+        '{"found":true,"favorited":true,"disliked":false,"rating":70}'
+      )
+    );
     expect(await operations.updateTrack(TRACK_ID, { favorited: true })).toEqual(
       {
         disliked: false,
@@ -95,14 +112,12 @@ describe("createLibraryOperations.updateTrack", () => {
   });
 
   test("maps an unknown track ID to not_found", async () => {
-    const operations = createLibraryOperations(async () => ({
-      stderr: "",
-      stdout: '{"found":false}',
-    }));
-    const error = await operations
-      .updateTrack(TRACK_ID, { rating: 20 })
-      .catch((error: unknown) => error);
-    expect(error).toBeInstanceOf(MusicToolError);
-    expect((error as MusicToolError).code).toBe("not_found");
+    const operations = createLibraryOperations(
+      execReturning('{"found":false}')
+    );
+    const error = await errorOf(
+      operations.updateTrack(TRACK_ID, { rating: 20 })
+    );
+    expect(error.code).toBe("not_found");
   });
 });

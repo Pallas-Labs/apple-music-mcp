@@ -10,13 +10,13 @@ interface Info {
   folderId?: string;
 }
 
-function playlistPayload({
+const playlistPayload = ({
   kind,
   applied,
   name = "Road Trip",
   folderId = "",
-}: Info): string {
-  return JSON.stringify({
+}: Info): string =>
+  JSON.stringify({
     applied,
     folderId,
     found: true,
@@ -26,22 +26,27 @@ function playlistPayload({
     name,
     trackCount: 12,
   });
-}
 
-function recordingRunner(stdout: string) {
+const recordingRunner = (stdout: string) => {
   const scripts: string[] = [];
   const operations = createPlaylistEditOperations(async (script) => {
     scripts.push(script);
-    return { stderr: "", stdout };
+    return await Promise.resolve({ stderr: "", stdout });
   });
   return { operations, scripts };
-}
+};
 
-async function errorOf(promise: Promise<unknown>): Promise<MusicToolError> {
-  const error = await promise.catch((error: unknown) => error);
-  expect(error).toBeInstanceOf(MusicToolError);
-  return error as MusicToolError;
-}
+const errorOf = async (promise: Promise<unknown>): Promise<MusicToolError> => {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof MusicToolError) {
+      return error;
+    }
+    throw error;
+  }
+  throw new Error("Expected the call to reject with a MusicToolError.");
+};
 
 describe("createPlaylistEditOperations.describe", () => {
   test("reports any kind of playlist, including ones that refuse edits", async () => {
@@ -80,14 +85,16 @@ describe("createPlaylistEditOperations.delete", () => {
   });
 
   test("refuses folders, subscriptions, and built-in playlists", async () => {
-    for (const kind of ["folder", "subscription", "system"] as const) {
-      const { operations } = recordingRunner(
-        playlistPayload({ applied: false, kind })
-      );
-      const error = await errorOf(operations.delete("ABCDEF1234567890"));
-      expect(error.code).toBe("validation_error");
-      expect(error.message).toStartWith('"Road Trip" is a');
-    }
+    await Promise.all(
+      (["folder", "subscription", "system"] as const).map(async (kind) => {
+        const { operations } = recordingRunner(
+          playlistPayload({ applied: false, kind })
+        );
+        const error = await errorOf(operations.delete("ABCDEF1234567890"));
+        expect(error.code).toBe("validation_error");
+        expect(error.message).toStartWith('"Road Trip" is a');
+      })
+    );
   });
 
   test("reports script_error when Music did not apply the delete", async () => {
@@ -121,14 +128,18 @@ describe("createPlaylistEditOperations.rename", () => {
   });
 
   test("refuses built-in and subscription playlists with validation_error", async () => {
-    for (const kind of ["system", "subscription"] as const) {
-      const { operations } = recordingRunner(
-        playlistPayload({ applied: false, kind })
-      );
-      const error = await errorOf(operations.rename("ABCDEF1234567890", "New"));
-      expect(error.code).toBe("validation_error");
-      expect(error.message).toStartWith('"Road Trip" ');
-    }
+    await Promise.all(
+      (["system", "subscription"] as const).map(async (kind) => {
+        const { operations } = recordingRunner(
+          playlistPayload({ applied: false, kind })
+        );
+        const error = await errorOf(
+          operations.rename("ABCDEF1234567890", "New")
+        );
+        expect(error.code).toBe("validation_error");
+        expect(error.message).toStartWith('"Road Trip" ');
+      })
+    );
   });
 
   test("maps an unknown ID to not_found", async () => {

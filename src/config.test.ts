@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
+import * as z from "zod/v4";
+
 import { readBooleanEnv, SERVER_VERSION } from "./config.js";
 
 describe("readBooleanEnv", () => {
@@ -60,11 +62,13 @@ describe("readBooleanEnv", () => {
 
 describe("SERVER_VERSION", () => {
   test("matches package.json version", () => {
-    const packageJson = JSON.parse(
-      readFileSync(new URL("../package.json", import.meta.url), "utf-8")
-    ) as {
-      version: string;
-    };
+    const packageJson = z
+      .object({ version: z.string() })
+      .parse(
+        JSON.parse(
+          readFileSync(new URL("../package.json", import.meta.url), "utf-8")
+        )
+      );
     expect(SERVER_VERSION).toBe(packageJson.version);
   });
 });

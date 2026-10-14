@@ -1,4 +1,6 @@
-export function log(event: string, data: Record<string, unknown>): void {
+import type { DiagnosticData } from "./types.js";
+
+export const log = (event: string, data: DiagnosticData): void => {
   console.error(
     JSON.stringify({
       event,
@@ -6,4 +8,4 @@ export function log(event: string, data: Record<string, unknown>): void {
       ...data,
     })
   );
-}
+};

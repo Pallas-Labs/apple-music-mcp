@@ -36,41 +36,15 @@ const movePlaylistOutputSchema = z.object({
   }),
 });
 
-export const movePlaylistTool = defineTool({
-  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
-  description:
-    "Move a user playlist into a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  dryRunResult({ playlistId, targetFolderId }) {
-    return {
-      playlist: {
-        id: playlistId,
-        name: "DRY_RUN_PLAYLIST",
-        folderId: targetFolderId,
-        isSmart: false,
-        trackCount: 0,
-      },
-    };
-  },
-  async handler({ playlistId, targetFolderId }) {
-    const playlist = await moveOperations.movePlaylist({
-      playlistId,
-      targetFolderId,
-    });
-    return {
-      structuredContent: { playlist },
-      logData: { playlistId, targetFolderId },
-    };
-  },
-  inputSchema: movePlaylistInputSchema,
-  name: "music.move_playlist",
-  outputSchema: movePlaylistOutputSchema,
-  writesRequired: true,
-});
+interface MovePlaylistInput {
+  playlistId: string;
+  targetFolderId: string;
+}
 
-async function movePlaylist(
-  input: { playlistId: string; targetFolderId: string },
+const movePlaylist = async (
+  input: MovePlaylistInput,
   execFn: ExecFn | undefined
-): Promise<Playlist> {
+): Promise<Playlist> => {
   const safePlaylistId = escapeAppleScriptString(input.playlistId);
   const safeFolderId = escapeAppleScriptString(input.targetFolderId);
   const body = `
@@ -117,23 +91,53 @@ end jsonPlaylist`;
     playlistRowSchema,
     "Music returned an invalid move playlist payload."
   );
-  const folderId = parsed.folderId.trim();
-  return {
+  const playlist: Playlist = {
     id: parsed.id,
-    name: parsed.name,
     isSmart: parsed.isSmart,
-    ...(folderId.length > 0 ? { folderId } : {}),
+    name: parsed.name,
     trackCount: parsed.trackCount,
   };
-}
+  const folderId = parsed.folderId.trim();
+  if (folderId.length > 0) {
+    playlist.folderId = folderId;
+  }
+  return playlist;
+};
 
-export function createMoveOperations(execFn?: ExecFn) {
-  return {
-    movePlaylist: async (input: {
-      playlistId: string;
-      targetFolderId: string;
-    }) => movePlaylist(input, execFn),
-  };
-}
+export const createMoveOperations = (execFn?: ExecFn) => ({
+  movePlaylist: async (input: MovePlaylistInput) =>
+    await movePlaylist(input, execFn),
+});
 
 const moveOperations = createMoveOperations();
+
+export const movePlaylistTool = defineTool({
+  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
+  description:
+    "Move a user playlist into a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
+  dryRunResult({ playlistId, targetFolderId }) {
+    return {
+      playlist: {
+        folderId: targetFolderId,
+        id: playlistId,
+        isSmart: false,
+        name: "DRY_RUN_PLAYLIST",
+        trackCount: 0,
+      },
+    };
+  },
+  async handler({ playlistId, targetFolderId }) {
+    const playlist = await moveOperations.movePlaylist({
+      playlistId,
+      targetFolderId,
+    });
+    return {
+      logData: { playlistId, targetFolderId },
+      structuredContent: { playlist },
+    };
+  },
+  inputSchema: movePlaylistInputSchema,
+  name: "music.move_playlist",
+  outputSchema: movePlaylistOutputSchema,
+  writesRequired: true,
+});

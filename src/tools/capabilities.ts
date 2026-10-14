@@ -26,13 +26,13 @@ export const capabilitiesTool = defineTool({
     "Report the server version, write and dry-run flags, and the names of all tools.",
   async handler(_input, { config, toolNames }) {
     const capabilities = {
+      dryRun: config.dryRun,
       serverName: SERVER_NAME,
       serverVersion: SERVER_VERSION,
-      writesEnabled: config.writesEnabled,
-      dryRun: config.dryRun,
       tools: [...toolNames],
+      writesEnabled: config.writesEnabled,
     };
-    return { structuredContent: capabilities };
+    return await Promise.resolve({ structuredContent: capabilities });
   },
   inputSchema: capabilitiesInputSchema,
   name: "music.capabilities",

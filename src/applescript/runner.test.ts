@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
 import { MusicToolError } from "../types.js";
 import {
@@ -8,6 +8,23 @@ import {
   mapAppleScriptError,
 } from "./runner.js";
 import type { ExecFn } from "./runner.js";
+
+const execReturning = (stdout: string) =>
+  mock<ExecFn>().mockResolvedValue({ stderr: "", stdout });
+
+const execRejecting = (error: Error) => mock<ExecFn>().mockRejectedValue(error);
+
+const errorOf = async <T>(promise: Promise<T>): Promise<MusicToolError> => {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof MusicToolError) {
+      return error;
+    }
+    throw error;
+  }
+  throw new Error("Expected the promise to reject with a MusicToolError.");
+};
 
 describe("parseAppleScriptErrorNumber", () => {
   test("returns last error number from stderr", () => {
@@ -102,67 +119,54 @@ describe("mapAppleScriptError", () => {
 
 describe("runAppleScript", () => {
   test("returns stdout/stderr from exec function", async () => {
-    const mockExec: ExecFn = async () => ({ stderr: "", stdout: "hello" });
-    const result = await runAppleScript("script", 5000, mockExec);
+    const result = await runAppleScript("script", 5000, execReturning("hello"));
     expect(result.stdout).toBe("hello");
   });
 
   test("maps exec errors to MusicToolError", async () => {
-    const mockExec: ExecFn = async () => {
-      const err = new Error("timeout") as any;
-      err.code = "ETIMEDOUT";
-      err.stderr = "";
-      throw err;
-    };
-    try {
-      await runAppleScript("script", 5000, mockExec);
-      expect(true).toBe(false); // should not reach
-    } catch (error) {
-      expect(error).toBeInstanceOf(MusicToolError);
-      expect((error as MusicToolError).code).toBe("timeout");
-    }
+    const mockExec = execRejecting(
+      Object.assign(new Error("timeout"), { code: "ETIMEDOUT", stderr: "" })
+    );
+    const error = await errorOf(runAppleScript("script", 5000, mockExec));
+    expect(error.code).toBe("timeout");
   });
 
   test("passes script, timeout, and language to exec function", async () => {
-    const received: unknown[] = [];
-    const mockExec: ExecFn = async (script, timeout, language) => {
-      received.push([script, timeout, language]);
-      return { stderr: "", stdout: "" };
-    };
+    const mockExec = execReturning("");
     await runAppleScript("test-script", 42_000, mockExec);
     await runJavaScript("js-script", 7000, mockExec);
-    expect(received).toEqual([
+    expect(mockExec.mock.calls).toEqual([
       ["test-script", 42_000, "AppleScript"],
       ["js-script", 7000, "JavaScript"],
     ]);
   });
 
   test("maps JXA errors through the AppleScript error numbers", async () => {
-    const mockExec: ExecFn = async () => {
-      const err = new Error("exec") as any;
-      err.code = 1;
-      err.stderr = "execution error: Error: Error: Can't get object. (-1728)";
-      throw err;
-    };
-    await expect(runJavaScript("script", 5000, mockExec)).rejects.toMatchObject(
-      {
-        code: "not_found",
-      }
+    const mockExec = execRejecting(
+      Object.assign(new Error("exec"), {
+        code: 1,
+        stderr: "execution error: Error: Error: Can't get object. (-1728)",
+      })
     );
+    const error = await errorOf(runJavaScript("script", 5000, mockExec));
+    expect(error.code).toBe("not_found");
   });
 
   test("normalizes quoted scalar stdout", async () => {
-    const mockExec: ExecFn = async () => ({ stderr: "", stdout: '"running"' });
-    const result = await runAppleScript("script", 5000, mockExec);
+    const result = await runAppleScript(
+      "script",
+      5000,
+      execReturning('"running"')
+    );
     expect(result.stdout).toBe("running");
   });
 
   test("normalizes quoted JSON-string stdout", async () => {
-    const mockExec: ExecFn = async () => ({
-      stderr: "",
-      stdout: '"[{\\"id\\":\\"A\\"}]"',
-    });
-    const result = await runAppleScript("script", 5000, mockExec);
+    const result = await runAppleScript(
+      "script",
+      5000,
+      execReturning('"[{\\"id\\":\\"A\\"}]"')
+    );
     expect(result.stdout).toBe('[{"id":"A"}]');
   });
 });

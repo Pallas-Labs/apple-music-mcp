@@ -1,38 +1,42 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { CustomPromisify } from "node:util";
+
+import * as z from "zod/v4";
 
 import { MusicToolError } from "../types.js";
 
-const execFileAsync = promisify(execFile);
+// Typed as Node's custom promisify form, which attaches stdout and stderr to a rejected error.
+const promisifiableExecFile: CustomPromisify<typeof execFile.__promisify__> =
+  execFile;
+const execFileAsync = promisify(promisifiableExecFile);
 
 export interface AppleScriptExecResult {
   stdout: string;
   stderr: string;
 }
 
-type AppleScriptExecError = NodeJS.ErrnoException & {
-  stderr?: string;
-  stdout?: string;
-  signal?: NodeJS.Signals;
-};
+const execErrorSchema = z.object({
+  code: z.union([z.string(), z.number()]).nullish(),
+  signal: z.string().nullish(),
+  stderr: z.string().nullish(),
+});
 
-function normalizeAppleScriptStdout(stdout: string): string {
+type AppleScriptExecError = z.output<typeof execErrorSchema>;
+
+const normalizeAppleScriptStdout = (stdout: string): string => {
   const trimmed = stdout.trim();
   if (!(trimmed.startsWith('"') && trimmed.endsWith('"'))) {
     return trimmed;
   }
 
   try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed === "string") {
-      return parsed;
-    }
+    return z.string().parse(JSON.parse(trimmed));
   } catch {
     // Keep original output when unquoting fails.
+    return trimmed;
   }
-
-  return trimmed;
-}
+};
 
 export type ScriptLanguage = "AppleScript" | "JavaScript";
 
@@ -50,32 +54,32 @@ const defaultExecFn: ExecFn = async (script, timeoutMs, language) => {
       : ["-s", "s", "-e", script];
   const { stdout, stderr } = await execFileAsync("osascript", languageArgs, {
     encoding: "utf-8",
-    timeout: timeoutMs,
     // Bulk track reads can return tens of thousands of JSON rows.
     maxBuffer: 64 * 1024 * 1024,
+    timeout: timeoutMs,
   });
   return {
-    stderr: (stderr ?? "").trim(),
+    stderr: stderr.trim(),
     stdout: stdout.trim(),
   };
 };
 
-export function parseAppleScriptErrorNumber(stderr: string): number | null {
-  const matches = stderr.match(/\((-?\d+)\)/g);
+export const parseAppleScriptErrorNumber = (stderr: string): number | null => {
+  const matches = stderr.match(/\((?<errorNumber>-?\d+)\)/gu);
   if (!matches || matches.length === 0) {
     return null;
   }
   const last = matches.at(-1);
-  if (!last) {
+  if (last === undefined) {
     return null;
   }
-  const numeric = Number(last.replaceAll(/[()]/g, ""));
+  const numeric = Number(last.replaceAll(/[()]/gu, ""));
   return Number.isFinite(numeric) ? numeric : null;
-}
+};
 
-export function mapAppleScriptError(
+export const mapAppleScriptError = (
   error: AppleScriptExecError
-): MusicToolError {
+): MusicToolError => {
   const stderr = (error.stderr ?? "").trim();
   const errorNumber = parseAppleScriptErrorNumber(stderr);
 
@@ -129,14 +133,14 @@ export function mapAppleScriptError(
     errorNumber,
     stderr,
   });
-}
+};
 
-async function runScript(
+const runScript = async (
   script: string,
   timeoutMs: number,
   language: ScriptLanguage,
   execFn: ExecFn
-): Promise<AppleScriptExecResult> {
+): Promise<AppleScriptExecResult> => {
   try {
     const result = await execFn(script, timeoutMs, language);
     return {
@@ -144,23 +148,22 @@ async function runScript(
       stdout: normalizeAppleScriptStdout(result.stdout),
     };
   } catch (error) {
-    throw mapAppleScriptError(error as AppleScriptExecError);
+    const parsed = execErrorSchema.safeParse(error);
+    throw mapAppleScriptError(parsed.success ? parsed.data : {});
   }
-}
+};
 
-export async function runAppleScript(
+export const runAppleScript = async (
   script: string,
   timeoutMs = 15_000,
   execFn: ExecFn = defaultExecFn
-): Promise<AppleScriptExecResult> {
-  return runScript(script, timeoutMs, "AppleScript", execFn);
-}
+): Promise<AppleScriptExecResult> =>
+  await runScript(script, timeoutMs, "AppleScript", execFn);
 
 /** Run a JXA script. Errors surface with the same AppleScript error numbers. */
-export async function runJavaScript(
+export const runJavaScript = async (
   script: string,
   timeoutMs = 15_000,
   execFn: ExecFn = defaultExecFn
-): Promise<AppleScriptExecResult> {
-  return runScript(script, timeoutMs, "JavaScript", execFn);
-}
+): Promise<AppleScriptExecResult> =>
+  await runScript(script, timeoutMs, "JavaScript", execFn);
