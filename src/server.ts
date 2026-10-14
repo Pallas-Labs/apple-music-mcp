@@ -81,6 +81,7 @@ const clientCapabilities = (
       return declared.value;
     }
   }
+  // oxlint-disable-next-line typescript/no-deprecated -- The SDK's documented source for 2025-era clients.
   return server.server.getClientCapabilities();
 };
 
