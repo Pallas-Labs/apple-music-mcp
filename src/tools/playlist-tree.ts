@@ -2,14 +2,15 @@ import * as z from "zod/v4";
 
 import { toJavaScriptLiteral } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runJavaScript, type ExecFn } from "../applescript/runner.js";
+import { runJavaScript } from '../applescript/runner.js';
+import type { ExecFn } from '../applescript/runner.js';
 import { buildJavaScript } from "../applescript/templates.js";
 
 const playlistEntrySchema = z.object({
   id: z.string(),
-  name: z.string(),
-  kind: z.enum(["user", "folder"]),
   isSmart: z.boolean(),
+  kind: z.enum(["user", "folder"]),
+  name: z.string(),
 });
 export type PlaylistEntry = z.output<typeof playlistEntrySchema>;
 
@@ -52,7 +53,7 @@ export async function readParentIds(
     chunks.push(ids.slice(start, start + chunkSize));
   }
   const parents = (
-    await Promise.all(chunks.map((chunk) => readParentChunk(chunk, execFn)))
+    await Promise.all(chunks.map( async (chunk) => readParentChunk(chunk, execFn)))
   ).flat();
   return new Map(ids.map((id, index) => [id, parents[index] ?? ""]));
 }

@@ -2,32 +2,27 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript, type ExecFn } from "../applescript/runner.js";
+import { runAppleScript } from '../applescript/runner.js';
+import type { ExecFn } from '../applescript/runner.js';
 import { buildScript } from "../applescript/templates.js";
 import { persistentIdSchema } from "../config.js";
-import {
-  defineTool,
-  IDEMPOTENT_WRITE_ANNOTATIONS,
-  type ToolSchemaOutput,
-} from "../tool-contracts.js";
+import { defineTool, IDEMPOTENT_WRITE_ANNOTATIONS } from '../tool-contracts.js';
+import type { ToolSchemaOutput } from '../tool-contracts.js';
 import { MusicToolError } from "../types.js";
 
 const updateTrackInputSchema = z
   .object({
-    trackId: persistentIdSchema.describe(
-      "Persistent track ID from music.search_library, music.find_tracks, or music.get_playlist_tracks."
-    ),
-    favorited: z
-      .boolean()
-      .optional()
-      .describe(
-        "Mark or unmark the track as a favorite. true also clears disliked."
-      ),
     disliked: z
       .boolean()
       .optional()
       .describe(
         "Mark or unmark the track as disliked. true also clears favorited."
+      ),
+    favorited: z
+      .boolean()
+      .optional()
+      .describe(
+        "Mark or unmark the track as a favorite. true also clears disliked."
       ),
     rating: z
       .number()
@@ -36,6 +31,9 @@ const updateTrackInputSchema = z
       .max(5)
       .optional()
       .describe("Star rating from 0 to 5. 0 clears the rating."),
+    trackId: persistentIdSchema.describe(
+      "Persistent track ID from music.search_library, music.find_tracks, or music.get_playlist_tracks."
+    ),
   })
   .refine(
     (input) =>
@@ -48,15 +46,15 @@ const updateTrackInputSchema = z
     message: "A track cannot be both favorited and disliked.",
   });
 const updateTrackOutputSchema = z.object({
-  trackId: z.string().describe("Persistent track ID."),
-  favorited: z.boolean().describe("True when the track is a favorite."),
   disliked: z.boolean().describe("True when the track is disliked."),
+  favorited: z.boolean().describe("True when the track is a favorite."),
   rating: z
     .number()
     .int()
     .describe(
       "Star rating from 0 to 5, rounded. Music may derive it from the album rating."
     ),
+  trackId: z.string().describe("Persistent track ID."),
 });
 
 type TrackUpdate = ToolSchemaOutput<typeof updateTrackInputSchema>;
@@ -73,20 +71,20 @@ export function planTrackWrites({
   rating,
 }: TrackUpdate): TrackWrites {
   const writes: TrackWrites = {};
-  if (favorited !== undefined) writes.favorited = favorited;
-  else if (disliked === true) writes.favorited = false;
-  if (disliked !== undefined) writes.disliked = disliked;
-  else if (favorited === true) writes.disliked = false;
-  if (rating !== undefined) writes.rating = rating * 20;
+  if (favorited !== undefined) {writes.favorited = favorited;}
+  else if (disliked === true) {writes.favorited = false;}
+  if (disliked !== undefined) {writes.disliked = disliked;}
+  else if (favorited === true) {writes.disliked = false;}
+  if (rating !== undefined) {writes.rating = rating * 20;}
   return writes;
 }
 
 const updateTrackScriptResultSchema = z.discriminatedUnion("found", [
   z.object({ found: z.literal(false) }),
   z.object({
-    found: z.literal(true),
-    favorited: z.boolean(),
     disliked: z.boolean(),
+    favorited: z.boolean(),
+    found: z.literal(true),
     rating: z.number(),
   }),
 ]);
@@ -138,10 +136,10 @@ export function createLibraryOperations(execFn?: ExecFn) {
         );
       }
       return {
-        trackId,
-        favorited: parsed.favorited,
         disliked: parsed.disliked,
+        favorited: parsed.favorited,
         rating: Math.round(parsed.rating / 20),
+        trackId,
       };
     },
   };
@@ -150,13 +148,9 @@ export function createLibraryOperations(execFn?: ExecFn) {
 const libraryOperations = createLibraryOperations();
 
 export const updateTrackTool = defineTool({
-  name: "music.update_track",
+  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
   description:
     "Set a library track's favorite, dislike, or 0-5 star rating. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  inputSchema: updateTrackInputSchema,
-  outputSchema: updateTrackOutputSchema,
-  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
-  writesRequired: true,
   dryRunResult(input) {
     const writes = planTrackWrites(input);
     return {
@@ -173,4 +167,8 @@ export const updateTrackTool = defineTool({
     );
     return { structuredContent: result, logData: { trackId: input.trackId } };
   },
+  inputSchema: updateTrackInputSchema,
+  name: "music.update_track",
+  outputSchema: updateTrackOutputSchema,
+  writesRequired: true,
 });

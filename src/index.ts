@@ -7,7 +7,7 @@ import { serveHttp } from "./http.js";
 import { log } from "./logger.js";
 import { createServer } from "./server.js";
 
-const httpPort = process.env["APPLE_MUSIC_MCP_HTTP_PORT"]?.trim();
+const httpPort = process.env.APPLE_MUSIC_MCP_HTTP_PORT?.trim();
 if (httpPort && !/^\d{1,5}$/.test(httpPort)) {
   log("server_fatal", {
     message: `APPLE_MUSIC_MCP_HTTP_PORT must be a port number, got "${httpPort}".`,
@@ -19,13 +19,13 @@ const handle = httpPort
   : serveStdio(() => createServer());
 log("server_started", {
   name: SERVER_NAME,
-  version: SERVER_VERSION,
   transport: httpPort ? `http://127.0.0.1:${httpPort}/mcp` : "stdio",
+  version: SERVER_VERSION,
 });
 
 let shuttingDown = false;
 function shutdown(): void {
-  if (shuttingDown) return;
+  if (shuttingDown) {return;}
   shuttingDown = true;
   log("server_shutdown", { name: SERVER_NAME });
   void handle.close().then(
@@ -37,7 +37,7 @@ function shutdown(): void {
       process.exit(1);
     }
   );
-  setTimeout(() => process.exit(1), 5_000).unref();
+  setTimeout(() => process.exit(1), 5000).unref();
 }
 
 process.on("SIGINT", shutdown);

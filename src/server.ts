@@ -10,14 +10,11 @@ import type {
 } from "@modelcontextprotocol/server";
 
 import type { AnyToolDef, ToolContext, ToolSchema } from "./tool-contracts.js";
+
 export { defineTool } from "./tool-contracts.js";
 export type { ToolContext, ToolDef, ToolResult } from "./tool-contracts.js";
-import {
-  SERVER_NAME,
-  SERVER_VERSION,
-  runtimeConfig,
-  type RuntimeConfig,
-} from "./config.js";
+import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from './config.js';
+import type { RuntimeConfig } from './config.js';
 import { log } from "./logger.js";
 import {
   registerPrompts,
@@ -56,15 +53,15 @@ export function toolErrorResult(error: unknown): {
         };
 
   return {
-    isError: true,
     content: [{ type: "text", text: JSON.stringify(payload) }],
+    isError: true,
   };
 }
 
-export type CreateServerOptions = {
+export interface CreateServerOptions {
   config?: RuntimeConfig;
   tools?: readonly AnyToolDef[];
-};
+}
 
 export function createServer({
   config = runtimeConfig,
@@ -72,29 +69,29 @@ export function createServer({
 }: CreateServerOptions = {}): McpServer {
   const server = new McpServer(
     {
+      description:
+        "Read/write access to Apple Music playlists, folders, tracks, and playback on macOS. Mutations are non-atomic via AppleScript — partial failures are possible for bulk operations.",
       name: SERVER_NAME,
       title: "Apple Music MCP",
       version: SERVER_VERSION,
-      description:
-        "Read/write access to Apple Music playlists, folders, tracks, and playback on macOS. Mutations are non-atomic via AppleScript — partial failures are possible for bulk operations.",
       websiteUrl: "https://github.com/Pallas-Labs/apple-music-mcp",
     },
     {
-      capabilities: {
-        tools: {},
-        resources: {},
-        prompts: {},
-      },
       cacheHints: {
-        "tools/list": STATIC_CATALOGUE_CACHE_HINT,
         "prompts/list": STATIC_CATALOGUE_CACHE_HINT,
         "resources/list": STATIC_CATALOGUE_CACHE_HINT,
         "resources/templates/list": STATIC_CATALOGUE_CACHE_HINT,
         "server/discover": STATIC_CATALOGUE_CACHE_HINT,
+        "tools/list": STATIC_CATALOGUE_CACHE_HINT,
       },
-      maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
+      capabilities: {
+        prompts: {},
+        resources: {},
+        tools: {},
+      },
       instructions:
         "Call music.health first. Read tools never change Music. Write tools need APPLE_MUSIC_MCP_ENABLE_WRITES=true. Each result is structuredContent that matches the tool's outputSchema. Errors set isError; server errors carry JSON text {code,message}. Pass persistent IDs from read results to later tools. If your client runs tools from code, chain read calls in one script. Bulk writes are not atomic, so check the returned ID lists. See music://guide.",
+      maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
     }
   );
 
@@ -102,7 +99,7 @@ export function createServer({
     config,
     toolNames: tools.map((tool) => tool.name),
   };
-  for (const tool of tools) registerTool(server, tool, serverInfo);
+  for (const tool of tools) {registerTool(server, tool, serverInfo);}
   registerResources(server);
   registerPrompts(server);
 
@@ -115,9 +112,7 @@ function clientCapabilities(
 ): ClientCapabilities | undefined {
   // 2026-07-28 requests carry capabilities in their envelope; 2025-era clients declared them at
   // initialize, which only the server instance remembers.
-  const envelope = ctx.mcpReq.envelope as
-    | Partial<Record<typeof CLIENT_CAPABILITIES_META_KEY, ClientCapabilities>>
-    | undefined;
+  const envelope = ctx.mcpReq.envelope;
   return (
     envelope?.[CLIENT_CAPABILITIES_META_KEY] ??
     server.server.getClientCapabilities()
@@ -152,11 +147,11 @@ function registerTool(
   server.registerTool<ToolSchema, ToolSchema>(
     tool.name,
     {
-      title: toolTitle(tool.name),
+      annotations: tool.annotations,
       description: tool.description,
       inputSchema: tool.inputSchema,
       outputSchema: tool.outputSchema,
-      annotations: tool.annotations,
+      title: toolTitle(tool.name),
     },
     (async (input: never, ctx: ServerContext) => {
       const startedAt = Date.now();
@@ -183,13 +178,13 @@ function registerTool(
           return {
             content: [
               {
-                type: "text" as const,
                 text: JSON.stringify({
                   dryRun: true,
                   tool: tool.name,
                   input,
                   response: structuredContent,
                 }),
+                type: "text" as const,
               },
             ],
             structuredContent,
@@ -199,20 +194,20 @@ function registerTool(
         // Each round of a multi-round call takes the lock separately, so no lock is held while the
         // client waits on the user.
         const context = toolContext(server, ctx, serverInfo);
-        const execute = () => tool.handler(input, context);
+        const execute =  async () => tool.handler(input, context);
         const lockCall = tool.writesRequired && tool.lock !== "handler";
         const result = lockCall
           ? await withMutationLock(execute)
           : await execute();
         if (isInputRequiredResult(result)) {
           log("tool_input_required", {
-            tool: tool.name,
             durationMs: Date.now() - startedAt,
             inputRequests: Object.keys(result.inputRequests ?? {}),
+            tool: tool.name,
           });
           return result;
         }
-        const structuredContent = result.structuredContent;
+        const {structuredContent} = result;
         if (!isRecord(structuredContent)) {
           throw new MusicToolError(
             "script_error",
@@ -221,22 +216,22 @@ function registerTool(
         }
 
         log("tool_success", {
-          tool: tool.name,
           durationMs: Date.now() - startedAt,
+          tool: tool.name,
           ...result.logData,
         });
 
         return {
           content: [
-            { type: "text" as const, text: JSON.stringify(structuredContent) },
+            { text: JSON.stringify(structuredContent), type: "text" as const },
           ],
           structuredContent,
         };
       } catch (error) {
         log("tool_error", {
-          tool: tool.name,
           durationMs: Date.now() - startedAt,
           message: error instanceof Error ? error.message : String(error),
+          tool: tool.name,
         });
         return toolErrorResult(error);
       }

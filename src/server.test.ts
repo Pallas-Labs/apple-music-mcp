@@ -4,9 +4,11 @@ import {
   Client,
   InMemoryTransport,
   StreamableHTTPClientTransport,
-  type ClientOptions,
-  type ElicitRequestFormParams,
-  type ElicitResult,
+} from "@modelcontextprotocol/client";
+import type {
+  ClientOptions,
+  ElicitRequestFormParams,
+  ElicitResult,
 } from "@modelcontextprotocol/client";
 import {
   createMcpHandler,
@@ -16,12 +18,8 @@ import {
 import * as z from "zod/v4";
 
 import { runtimeConfig } from "./config.js";
-import {
-  createServer,
-  defineTool,
-  toolErrorResult,
-  type CreateServerOptions,
-} from "./server.js";
+import { createServer, defineTool, toolErrorResult } from "./server.js";
+import type { CreateServerOptions } from "./server.js";
 import {
   addTracksToPlaylistTool,
   capabilitiesTool,
@@ -45,58 +43,82 @@ import { createCriteriaPlaylistTool } from "./tools/playlists.js";
 import { MusicToolError } from "./types.js";
 
 const READ_ANNOTATIONS = {
-  readOnlyHint: true,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
+  readOnlyHint: true,
 };
 const ADDITIVE_ANNOTATIONS = {
-  readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: false,
   openWorldHint: false,
+  readOnlyHint: false,
 };
 const IDEMPOTENT_ANNOTATIONS = {
-  readOnlyHint: false,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
+  readOnlyHint: false,
 };
 const DESTRUCTIVE_ANNOTATIONS = {
-  readOnlyHint: false,
   destructiveHint: true,
   idempotentHint: true,
   openWorldHint: false,
+  readOnlyHint: false,
 };
 
+/** The order clients see tools in, from tools/list and music.capabilities. */
+const TOOL_ORDER = [
+  "music.capabilities",
+  "music.health",
+  "music.list_folders",
+  "music.list_playlists",
+  "music.create_playlist",
+  "music.create_playlist_from_criteria",
+  "music.create_folder",
+  "music.move_playlist",
+  "music.rename_playlist",
+  "music.delete_playlist",
+  "music.get_now_playing",
+  "music.playback_control",
+  "music.play",
+  "music.set_player",
+  "music.search_library",
+  "music.find_tracks",
+  "music.get_playlist_tracks",
+  "music.add_tracks_to_playlist",
+  "music.remove_tracks_from_playlist",
+  "music.update_track",
+];
+
 const EXPECTED_ANNOTATIONS = {
+  "music.add_tracks_to_playlist": ADDITIVE_ANNOTATIONS,
   "music.capabilities": READ_ANNOTATIONS,
+  "music.create_folder": ADDITIVE_ANNOTATIONS,
+  "music.create_playlist": ADDITIVE_ANNOTATIONS,
+  "music.create_playlist_from_criteria": ADDITIVE_ANNOTATIONS,
+  "music.delete_playlist": DESTRUCTIVE_ANNOTATIONS,
+  "music.find_tracks": READ_ANNOTATIONS,
+  "music.get_now_playing": READ_ANNOTATIONS,
+  "music.get_playlist_tracks": READ_ANNOTATIONS,
   "music.health": READ_ANNOTATIONS,
   "music.list_folders": READ_ANNOTATIONS,
   "music.list_playlists": READ_ANNOTATIONS,
-  "music.create_playlist": ADDITIVE_ANNOTATIONS,
-  "music.create_playlist_from_criteria": ADDITIVE_ANNOTATIONS,
-  "music.create_folder": ADDITIVE_ANNOTATIONS,
   "music.move_playlist": IDEMPOTENT_ANNOTATIONS,
-  "music.rename_playlist": IDEMPOTENT_ANNOTATIONS,
-  "music.delete_playlist": DESTRUCTIVE_ANNOTATIONS,
-  "music.get_now_playing": READ_ANNOTATIONS,
-  "music.playback_control": ADDITIVE_ANNOTATIONS,
   "music.play": ADDITIVE_ANNOTATIONS,
-  "music.set_player": IDEMPOTENT_ANNOTATIONS,
-  "music.search_library": READ_ANNOTATIONS,
-  "music.find_tracks": READ_ANNOTATIONS,
-  "music.get_playlist_tracks": READ_ANNOTATIONS,
-  "music.add_tracks_to_playlist": ADDITIVE_ANNOTATIONS,
+  "music.playback_control": ADDITIVE_ANNOTATIONS,
   "music.remove_tracks_from_playlist": DESTRUCTIVE_ANNOTATIONS,
+  "music.rename_playlist": IDEMPOTENT_ANNOTATIONS,
+  "music.search_library": READ_ANNOTATIONS,
+  "music.set_player": IDEMPOTENT_ANNOTATIONS,
   "music.update_track": IDEMPOTENT_ANNOTATIONS,
 } as const;
 
-type TestClientOptions = {
+interface TestClientOptions {
   server?: CreateServerOptions;
   /** Declares the elicitation capability and answers every elicitation request. */
   elicit?: (params: ElicitRequestFormParams) => ElicitResult;
-};
+}
 
 const ERAS = ["2025-era", "2026-07-28"] as const;
 type Era = (typeof ERAS)[number];
@@ -129,15 +151,15 @@ async function withClient<T>(
       InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     await client.connect(clientTransport);
-    closeServer = () => server.close();
+    closeServer = async () => server.close();
   } else {
     const handler = createMcpHandler(() => createServer(options.server));
     await client.connect(
       new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
-        fetch: (url, init) => handler.fetch(new Request(url, init)),
+        fetch: async (url, init) => handler.fetch(new Request(url, init)),
       })
     );
-    closeServer = () => handler.close();
+    closeServer = async () => handler.close();
   }
 
   try {
@@ -148,15 +170,11 @@ async function withClient<T>(
   }
 }
 
-const WRITES_ENABLED = Object.freeze({ writesEnabled: true, dryRun: false });
+const WRITES_ENABLED = Object.freeze({ dryRun: false, writesEnabled: true });
 
 const askTool = defineTool({
-  name: "test.ask",
-  description: "Ask the client one question when it can elicit.",
-  inputSchema: z.object({}),
-  outputSchema: z.object({ canElicit: z.boolean(), answer: z.string() }),
   annotations: ADDITIVE_ANNOTATIONS,
-  writesRequired: true,
+  description: "Ask the client one question when it can elicit.",
   dryRunResult: () => ({ canElicit: false, answer: "dry run" }),
   async handler(_input, { canElicit, inputResponses }) {
     if (!canElicit)
@@ -179,14 +197,19 @@ const askTool = defineTool({
       },
     };
   },
+  inputSchema: z.object({}),
+  name: "test.ask",
+  outputSchema: z.object({ canElicit: z.boolean(), answer: z.string() }),
+  writesRequired: true,
 });
 
 describe("createServer", () => {
   test("registers all tools with schemas and exact annotations", async () => {
     await withClient("2025-era", async (client) => {
       const response = await client.listTools();
-      expect(response.tools.map((tool) => tool.name)).toEqual(
-        Object.keys(EXPECTED_ANNOTATIONS)
+      expect(response.tools.map((tool) => tool.name)).toEqual(TOOL_ORDER);
+      expect(Object.keys(EXPECTED_ANNOTATIONS).toSorted()).toEqual(
+        TOOL_ORDER.toSorted()
       );
       for (const tool of response.tools) {
         expect(tool.inputSchema).toBeDefined();
@@ -201,28 +224,26 @@ describe("createServer", () => {
   test("music.capabilities lists every registered tool in order", async () => {
     await withClient("2025-era", async (client) => {
       const response = await client.callTool({
-        name: "music.capabilities",
         arguments: {},
+        name: "music.capabilities",
       });
       expect(response.isError).toBeFalsy();
-      expect(response.structuredContent?.tools).toEqual(
-        Object.keys(EXPECTED_ANNOTATIONS)
-      );
+      expect(response.structuredContent?.tools).toEqual(TOOL_ORDER);
     });
   });
 
   test("music.capabilities reports the tools and config the server was created with", async () => {
-    const config = { writesEnabled: true, dryRun: true };
+    const config = { dryRun: true, writesEnabled: true };
     const response = await withClient(
       "2025-era",
-      (client) =>
-        client.callTool({ name: "music.capabilities", arguments: {} }),
+      async (client) =>
+        client.callTool({ arguments: {}, name: "music.capabilities" }),
       { server: { config, tools: [askTool, capabilitiesTool] } }
     );
     expect(response.structuredContent).toMatchObject({
-      writesEnabled: true,
       dryRun: true,
       tools: ["test.ask", "music.capabilities"],
+      writesEnabled: true,
     });
   });
 
@@ -231,14 +252,15 @@ describe("createServer", () => {
     async () => {
       await withClient("2025-era", async (client) => {
         const response = await client.callTool({
-          name: "music.create_playlist",
           arguments: { name: "Must Not Be Created" },
+          name: "music.create_playlist",
         });
         expect(response.isError).toBe(true);
         const content = response.content[0];
         expect(content?.type).toBe("text");
-        if (!content || content.type !== "text")
+        if (!content || content.type !== "text") {
           throw new Error("Expected text error content.");
+        }
         expect(JSON.parse(content.text)).toEqual({
           code: "validation_error",
           message:
@@ -282,7 +304,7 @@ describe("createServer", () => {
 
   test("2026-07-28 results carry cache hints for the static catalogue", async () => {
     await withClient("2026-07-28", async (client) => {
-      const staticHint = { ttlMs: 3_600_000, cacheScope: "private" };
+      const staticHint = { cacheScope: "private", ttlMs: 3_600_000 };
       const [tools, prompts, resources, templates, guide] = await Promise.all([
         client.listTools(),
         client.listPrompts(),
@@ -311,10 +333,10 @@ describe("createServer", () => {
   });
 
   test("rejects tool arguments with more than 512 elements before the handler runs", async () => {
-    const callWithElements = (client: Client, padding: number) =>
+    const callWithElements = async (client: Client, padding: number) =>
       client.callTool({
-        name: "music.capabilities",
         arguments: { padding: Array.from({ length: padding }, () => 0) },
+        name: "music.capabilities",
       });
 
     for (const era of ERAS) {
@@ -328,8 +350,8 @@ describe("createServer", () => {
         expect(overLimit.structuredContent).toBeUndefined();
         expect(overLimit.content).toEqual([
           {
-            type: "text",
             text: "Invalid arguments for tool music.capabilities: arguments contain more than the maximum of 512 elements",
+            type: "text",
           },
         ]);
       });
@@ -341,30 +363,30 @@ describe("createServer", () => {
       const messages: string[] = [];
       const answered = await withClient(
         era,
-        (client) => client.callTool({ name: "test.ask", arguments: {} }),
+        async (client) => client.callTool({ arguments: {}, name: "test.ask" }),
         {
-          server: { config: WRITES_ENABLED, tools: [askTool] },
           elicit: (params) => {
             messages.push(params.message);
             return { action: "decline" };
           },
+          server: { config: WRITES_ENABLED, tools: [askTool] },
         }
       );
       expect(answered.isError).toBeFalsy();
       expect(answered.structuredContent).toEqual({
-        canElicit: true,
         answer: "decline",
+        canElicit: true,
       });
       expect(messages).toEqual(["Go?"]);
 
       const unasked = await withClient(
         era,
-        (client) => client.callTool({ name: "test.ask", arguments: {} }),
+        async (client) => client.callTool({ arguments: {}, name: "test.ask" }),
         { server: { config: WRITES_ENABLED, tools: [askTool] } }
       );
       expect(unasked.structuredContent).toEqual({
-        canElicit: false,
         answer: "not asked",
+        canElicit: false,
       });
     }
   });
@@ -372,69 +394,70 @@ describe("createServer", () => {
   test("write tools provide exact dry-run payloads matching output schemas", () => {
     const cases = [
       {
+        outputSchema: createPlaylistTool.outputSchema,
         payload: createPlaylistTool.dryRunResult({
           name: "Dry Run Playlist",
           folderId: "ABCDEF1234567890",
         }),
-        outputSchema: createPlaylistTool.outputSchema,
       },
       {
+        outputSchema: createFolderTool.outputSchema,
         payload: createFolderTool.dryRunResult({
           name: "Dry Run Folder",
           parentId: "ABCDEF1234567890",
         }),
-        outputSchema: createFolderTool.outputSchema,
       },
       {
+        outputSchema: movePlaylistTool.outputSchema,
         payload: movePlaylistTool.dryRunResult({
           playlistId: "ABCDEF1234567890",
           targetFolderId: "12345678ABCDEFGH",
         }),
-        outputSchema: movePlaylistTool.outputSchema,
       },
       {
+        outputSchema: renamePlaylistTool.outputSchema,
         payload: renamePlaylistTool.dryRunResult({
           playlistId: "ABCDEF1234567890",
           name: "Renamed",
         }),
-        outputSchema: renamePlaylistTool.outputSchema,
       },
       {
+        outputSchema: deletePlaylistTool.outputSchema,
         payload: deletePlaylistTool.dryRunResult({
           playlistId: "ABCDEF1234567890",
         }),
-        outputSchema: deletePlaylistTool.outputSchema,
       },
       {
-        payload: playbackControlTool.dryRunResult({ action: "play" }),
         outputSchema: playbackControlTool.outputSchema,
+        payload: playbackControlTool.dryRunResult({ action: "play" }),
       },
       {
+        outputSchema: playTool.outputSchema,
         payload: playTool.dryRunResult({
           playlistId: "ABCDEF1234567890",
           shuffle: true,
         }),
-        outputSchema: playTool.outputSchema,
       },
       {
-        payload: setPlayerTool.dryRunResult({ volume: 40, repeat: "all" }),
         outputSchema: setPlayerTool.outputSchema,
+        payload: setPlayerTool.dryRunResult({ volume: 40, repeat: "all" }),
       },
       {
+        outputSchema: addTracksToPlaylistTool.outputSchema,
         payload: addTracksToPlaylistTool.dryRunResult({
           playlistId: "ABCDEF1234567890",
           trackIds: ["1111222233334444", "AAAABBBBCCCCDDDD"],
         }),
-        outputSchema: addTracksToPlaylistTool.outputSchema,
       },
       {
+        outputSchema: removeTracksFromPlaylistTool.outputSchema,
         payload: removeTracksFromPlaylistTool.dryRunResult({
           playlistId: "ABCDEF1234567890",
           trackIds: ["1111222233334444", "AAAABBBBCCCCDDDD"],
         }),
-        outputSchema: removeTracksFromPlaylistTool.outputSchema,
       },
       {
+        outputSchema: createPlaylistFromCriteriaTool.outputSchema,
         payload: createPlaylistFromCriteriaTool.dryRunResult({
           name: "Curated Set",
           criteria: {
@@ -445,14 +468,13 @@ describe("createServer", () => {
             sortBy: "playCount",
           },
         }),
-        outputSchema: createPlaylistFromCriteriaTool.outputSchema,
       },
       {
+        outputSchema: updateTrackTool.outputSchema,
         payload: updateTrackTool.dryRunResult({
           trackId: "AAAABBBBCCCCDDDD",
           disliked: true,
         }),
-        outputSchema: updateTrackTool.outputSchema,
       },
     ];
 
@@ -465,19 +487,15 @@ describe("createServer", () => {
 describe("mutation lock scope", () => {
   const PLAYLIST_ID = "ABCDEF1234567890";
   const TRACK_ID = "AAAABBBBCCCCDDDD";
-  const CRITERIA_ARGS = { name: "Eno", criteria: { artist: "Brian Eno" } };
+  const CRITERIA_ARGS = { criteria: { artist: "Brian Eno" }, name: "Eno" };
 
   /** A write tool with the default call-wide lock that runs only when `release` is called. */
   function gatedWriteTool(events: string[]) {
     const gate = Promise.withResolvers<void>();
     const started = Promise.withResolvers<void>();
     const tool = defineTool({
-      name: "test.write",
-      description: "Write after the test releases the gate.",
-      inputSchema: z.object({}),
-      outputSchema: z.object({ ok: z.boolean() }),
       annotations: ADDITIVE_ANNOTATIONS,
-      writesRequired: true,
+      description: "Write after the test releases the gate.",
       dryRunResult: () => ({ ok: false }),
       async handler() {
         events.push("other write start");
@@ -486,8 +504,18 @@ describe("mutation lock scope", () => {
         events.push("other write end");
         return { structuredContent: { ok: true } };
       },
+      inputSchema: z.object({}),
+      name: "test.write",
+      outputSchema: z.object({ ok: z.boolean() }),
+      writesRequired: true,
     });
-    return { tool, started: started.promise, release: () => gate.resolve() };
+    return {
+      release: () => {
+        gate.resolve();
+      },
+      started: started.promise,
+      tool,
+    };
   }
 
   function criteriaTool(
@@ -496,6 +524,21 @@ describe("mutation lock scope", () => {
   ) {
     const scanStarted = Promise.withResolvers<void>();
     const tool = createCriteriaPlaylistTool({
+      async addTracksToPlaylist(playlistId, trackIds) {
+        events.push("add");
+        return {
+          playlistId,
+          requested: trackIds.length,
+          added: trackIds.length,
+          addedTrackIds: trackIds,
+          missingTrackIds: [],
+          failedTrackIds: [],
+        };
+      },
+      async createPlaylist({ name }) {
+        events.push("create");
+        return { id: PLAYLIST_ID, name, isSmart: false, trackCount: 0 };
+      },
       async findTracks() {
         events.push("scan start");
         scanStarted.resolve();
@@ -520,23 +563,8 @@ describe("mutation lock scope", () => {
           truncated: false,
         };
       },
-      async createPlaylist({ name }) {
-        events.push("create");
-        return { id: PLAYLIST_ID, name, isSmart: false, trackCount: 0 };
-      },
-      async addTracksToPlaylist(playlistId, trackIds) {
-        events.push("add");
-        return {
-          playlistId,
-          requested: trackIds.length,
-          added: trackIds.length,
-          addedTrackIds: trackIds,
-          missingTrackIds: [],
-          failedTrackIds: [],
-        };
-      },
     });
-    return { tool, scanStarted: scanStarted.promise };
+    return { scanStarted: scanStarted.promise, tool };
   }
 
   test("another write runs while create_playlist_from_criteria is still scanning", async () => {
@@ -550,14 +578,14 @@ describe("mutation lock scope", () => {
       "2025-era",
       async (client) => {
         const pending = client.callTool({
-          name: "music.create_playlist_from_criteria",
           arguments: CRITERIA_ARGS,
+          name: "music.create_playlist_from_criteria",
         });
         await criteria.scanStarted;
 
         const write = await client.callTool({
-          name: "test.write",
           arguments: {},
+          name: "test.write",
         });
         expect(write.structuredContent).toEqual({ ok: true });
         expect(events).toEqual([
@@ -570,8 +598,8 @@ describe("mutation lock scope", () => {
         const created = await pending;
         expect(created.isError).toBeFalsy();
         expect(created.structuredContent).toMatchObject({
-          playlist: { id: PLAYLIST_ID, name: "Eno", trackCount: 1 },
           addedTrackIds: [TRACK_ID],
+          playlist: { id: PLAYLIST_ID, name: "Eno", trackCount: 1 },
         });
       },
       { server: { config: WRITES_ENABLED, tools: [criteria.tool, other.tool] } }
@@ -587,11 +615,11 @@ describe("mutation lock scope", () => {
     await withClient(
       "2025-era",
       async (client) => {
-        const write = client.callTool({ name: "test.write", arguments: {} });
+        const write = client.callTool({ arguments: {}, name: "test.write" });
         await other.started;
         const created = client.callTool({
-          name: "music.create_playlist_from_criteria",
           arguments: CRITERIA_ARGS,
+          name: "music.create_playlist_from_criteria",
         });
         await criteria.scanStarted;
         await new Promise((resolve) => setTimeout(resolve, 20));
@@ -616,8 +644,11 @@ describe("music.delete_playlist confirmation", () => {
     const deletedIds: string[] = [];
     const operations = createPlaylistEditOperations(async (script) => {
       const deleting = script.includes("delete p");
-      if (deleting) deletedIds.push(PLAYLIST_ID);
+      if (deleting) {
+        deletedIds.push(PLAYLIST_ID);
+      }
       return {
+        stderr: "",
         stdout: JSON.stringify({
           found: true,
           id: PLAYLIST_ID,
@@ -628,7 +659,6 @@ describe("music.delete_playlist confirmation", () => {
           folderId: "",
           applied: deleting,
         }),
-        stderr: "",
       };
     });
     return {
@@ -637,18 +667,22 @@ describe("music.delete_playlist confirmation", () => {
     };
   }
 
-  function callDelete(client: Client, args: Record<string, unknown> = {}) {
+  async function callDelete(
+    client: Client,
+    args: Record<string, unknown> = {}
+  ) {
     return client.callTool({
-      name: "music.delete_playlist",
       arguments: { playlistId: PLAYLIST_ID, ...args },
+      name: "music.delete_playlist",
     });
   }
 
   function errorPayload(response: Awaited<ReturnType<typeof callDelete>>) {
     expect(response.isError).toBe(true);
     const content = response.content[0];
-    if (!content || content.type !== "text")
+    if (!content || content.type !== "text") {
       throw new Error("Expected text error content.");
+    }
     return JSON.parse(content.text) as { code: string; message: string };
   }
 
@@ -659,13 +693,13 @@ describe("music.delete_playlist confirmation", () => {
       // confirm: true must not skip the prompt when the client can show one.
       const accepted = await withClient(
         era,
-        (client) => callDelete(client, { confirm: true }),
+        async (client) => callDelete(client, { confirm: true }),
         {
-          server,
           elicit: (params) => {
             prompts.push(params.message);
             return { action: "accept", content: { confirm: true } };
           },
+          server,
         }
       );
       expect(accepted.isError).toBeFalsy();
@@ -686,10 +720,14 @@ describe("music.delete_playlist confirmation", () => {
       ];
       for (const answer of answers) {
         const { deletedIds, server } = deleteServer();
-        const response = await withClient(era, (client) => callDelete(client), {
-          server,
-          elicit: () => answer,
-        });
+        const response = await withClient(
+          era,
+          async (client) => callDelete(client),
+          {
+            elicit: () => answer,
+            server,
+          }
+        );
         expect(errorPayload(response)).toEqual({
           code: "validation_error",
           message: "Deletion cancelled. Nothing was deleted.",
@@ -700,9 +738,13 @@ describe("music.delete_playlist confirmation", () => {
 
     test(`${era} client without elicitation must pass confirm: true`, async () => {
       const unconfirmed = deleteServer();
-      const refused = await withClient(era, (client) => callDelete(client), {
-        server: unconfirmed.server,
-      });
+      const refused = await withClient(
+        era,
+        async (client) => callDelete(client),
+        {
+          server: unconfirmed.server,
+        }
+      );
       const error = errorPayload(refused);
       expect(error.code).toBe("validation_error");
       expect(error.message).toContain("confirm: true");
@@ -711,7 +753,7 @@ describe("music.delete_playlist confirmation", () => {
       const confirmed = deleteServer();
       const deleted = await withClient(
         era,
-        (client) => callDelete(client, { confirm: true }),
+        async (client) => callDelete(client, { confirm: true }),
         {
           server: confirmed.server,
         }
@@ -729,13 +771,13 @@ describe("music.delete_playlist confirmation", () => {
     const prompts: string[] = [];
     const response = await withClient(
       "2025-era",
-      (client) => callDelete(client, { confirm: true }),
+      async (client) => callDelete(client, { confirm: true }),
       {
-        server,
         elicit: (params) => {
           prompts.push(params.message);
           return { action: "accept", content: { confirm: true } };
         },
+        server,
       }
     );
     const error = errorPayload(response);
@@ -747,19 +789,19 @@ describe("music.delete_playlist confirmation", () => {
 
   test("dry run returns the preview without prompting or deleting", async () => {
     const { deletedIds, server } = deleteServer("user", {
-      writesEnabled: true,
       dryRun: true,
+      writesEnabled: true,
     });
     const prompts: string[] = [];
     const response = await withClient(
       "2025-era",
-      (client) => callDelete(client),
+      async (client) => callDelete(client),
       {
-        server,
         elicit: (params) => {
           prompts.push(params.message);
           return { action: "accept", content: { confirm: true } };
         },
+        server,
       }
     );
     expect(response.structuredContent).toEqual({
@@ -771,14 +813,14 @@ describe("music.delete_playlist confirmation", () => {
   });
 });
 
-type JsonSchemaNode = {
+interface JsonSchemaNode {
   description?: string;
   properties?: Record<string, JsonSchemaNode>;
   items?: JsonSchemaNode;
   anyOf?: JsonSchemaNode[];
   oneOf?: JsonSchemaNode[];
   allOf?: JsonSchemaNode[];
-};
+}
 
 function undescribedProperties(schema: JsonSchemaNode, path: string): string[] {
   const nested = [

@@ -22,13 +22,13 @@ export class MusicToolError extends Error {
   }
 }
 
-export type Track = {
+export interface Track {
   id: string;
   name: string;
   artist: string;
   album: string;
   duration: number;
-};
+}
 
 export type LibraryTrack = Track & {
   genre: string;
@@ -38,7 +38,7 @@ export type LibraryTrack = Track & {
 
 export type TrackSortBy = "name" | "artist" | "album" | "year" | "playCount";
 
-export type TrackCriteria = {
+export interface TrackCriteria {
   nameQuery?: string | undefined;
   artist?: string | undefined;
   album?: string | undefined;
@@ -49,4 +49,4 @@ export type TrackCriteria = {
   playCountMax?: number | undefined;
   limit?: number | undefined;
   sortBy?: TrackSortBy | undefined;
-};
+}

@@ -2,11 +2,13 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript, type ExecFn } from "../applescript/runner.js";
+import { runAppleScript } from '../applescript/runner.js';
+import type { ExecFn } from '../applescript/runner.js';
 import { buildScript } from "../applescript/templates.js";
 import { persistentIdSchema } from "../config.js";
 import { defineTool, IDEMPOTENT_WRITE_ANNOTATIONS } from "../tool-contracts.js";
-import { playlistRowSchema, type Playlist } from "./playlists.js";
+import { playlistRowSchema } from './playlists.js';
+import type { Playlist } from './playlists.js';
 
 const movePlaylistInputSchema = z.object({
   playlistId: persistentIdSchema.describe(
@@ -18,15 +20,15 @@ const movePlaylistInputSchema = z.object({
 });
 const movePlaylistOutputSchema = z.object({
   playlist: z.object({
-    id: z.string().describe("Persistent playlist ID."),
-    name: z.string(),
     folderId: z
       .string()
       .optional()
       .describe("Persistent ID of the folder now holding the playlist."),
+    id: z.string().describe("Persistent playlist ID."),
     isSmart: z
       .boolean()
       .describe("True for smart playlists and built-in special playlists."),
+    name: z.string(),
     trackCount: z
       .number()
       .optional()
@@ -35,13 +37,9 @@ const movePlaylistOutputSchema = z.object({
 });
 
 export const movePlaylistTool = defineTool({
-  name: "music.move_playlist",
+  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
   description:
     "Move a user playlist into a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  inputSchema: movePlaylistInputSchema,
-  outputSchema: movePlaylistOutputSchema,
-  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
-  writesRequired: true,
   dryRunResult({ playlistId, targetFolderId }) {
     return {
       playlist: {
@@ -63,6 +61,10 @@ export const movePlaylistTool = defineTool({
       logData: { playlistId, targetFolderId },
     };
   },
+  inputSchema: movePlaylistInputSchema,
+  name: "music.move_playlist",
+  outputSchema: movePlaylistOutputSchema,
+  writesRequired: true,
 });
 
 async function movePlaylist(
@@ -127,7 +129,7 @@ end jsonPlaylist`;
 
 export function createMoveOperations(execFn?: ExecFn) {
   return {
-    movePlaylist: (input: { playlistId: string; targetFolderId: string }) =>
+    movePlaylist:  async (input: { playlistId: string; targetFolderId: string }) =>
       movePlaylist(input, execFn),
   };
 }

@@ -7,7 +7,8 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript, type ExecFn } from "../applescript/runner.js";
+import { runAppleScript } from '../applescript/runner.js';
+import type { ExecFn } from '../applescript/runner.js';
 import { buildScript } from "../applescript/templates.js";
 import { nameSchema, persistentIdSchema } from "../config.js";
 import {
@@ -16,7 +17,8 @@ import {
   IDEMPOTENT_WRITE_ANNOTATIONS,
 } from "../tool-contracts.js";
 import { MusicToolError } from "../types.js";
-import { playlistSchema, type Playlist } from "./playlists.js";
+import { playlistSchema } from './playlists.js';
+import type { Playlist } from './playlists.js';
 
 const PLAYLIST_KINDS = ["user", "folder", "subscription", "system"] as const;
 type PlaylistKind = (typeof PLAYLIST_KINDS)[number];
@@ -27,23 +29,23 @@ const EDIT_REFUSALS: Record<
   PlaylistKind,
   Partial<Record<PlaylistEdit, string>>
 > = {
-  user: {},
   folder: {
     delete:
       "is a folder. Deleting a folder also deletes every playlist inside it, so delete those playlists one at a time instead.",
   },
   subscription: {
-    rename:
-      "is an Apple Music playlist saved to your library, and only its curator can rename it.",
     delete:
       "is an Apple Music playlist saved to your library. Remove it from your library in Music.",
+    rename:
+      "is an Apple Music playlist saved to your library, and only its curator can rename it.",
   },
   system: {
-    rename:
-      "is a built-in playlist that Music manages, so it cannot be renamed.",
     delete:
       "is a built-in playlist that Music manages, so it cannot be deleted.",
+    rename:
+      "is a built-in playlist that Music manages, so it cannot be renamed.",
   },
+  user: {},
 };
 
 function editableKinds(edit: PlaylistEdit): PlaylistKind[] {
@@ -63,13 +65,13 @@ function assertEditable(playlist: PlaylistInfo, edit: PlaylistEdit): void {
 }
 
 const playlistInfoSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  kind: z.enum(PLAYLIST_KINDS),
-  isSmart: z.boolean(),
-  trackCount: z.number().int(),
-  folderId: z.string(),
   applied: z.boolean(),
+  folderId: z.string(),
+  id: z.string(),
+  isSmart: z.boolean(),
+  kind: z.enum(PLAYLIST_KINDS),
+  name: z.string(),
+  trackCount: z.number().int(),
 });
 type PlaylistInfo = z.output<typeof playlistInfoSchema>;
 
@@ -79,23 +81,23 @@ const playlistScriptResultSchema = z.discriminatedUnion("found", [
 ]);
 
 const renamePlaylistInputSchema = z.object({
+  name: nameSchema.describe("New name, 1-255 characters."),
   playlistId: persistentIdSchema.describe(
     "Persistent playlist or folder ID from music.list_playlists, music.list_folders, music.create_playlist, or music.create_folder."
   ),
-  name: nameSchema.describe("New name, 1-255 characters."),
 });
 const renamePlaylistOutputSchema = z.object({ playlist: playlistSchema });
 
 const deletePlaylistInputSchema = z.object({
-  playlistId: persistentIdSchema.describe(
-    "Persistent playlist ID from music.list_playlists or music.create_playlist. Folders are refused."
-  ),
   confirm: z
     .boolean()
     .optional()
     .describe(
       "Set true only after the user approves this deletion. Used only when the client cannot show a confirmation prompt."
     ),
+  playlistId: persistentIdSchema.describe(
+    "Persistent playlist ID from music.list_playlists or music.create_playlist. Folders are refused."
+  ),
 });
 const deletePlaylistOutputSchema = z.object({
   deletedPlaylistId: z
@@ -207,9 +209,9 @@ export function createPlaylistEditOperations(execFn?: ExecFn) {
   }
 
   return {
-    describe: (playlistId: string) =>
+    describe:  async (playlistId: string) =>
       runPlaylistScript(playlistId, buildPlaylistScript(playlistId)),
-    rename: (playlistId: string, name: string) =>
+    rename:  async (playlistId: string, name: string) =>
       editPlaylist(
         playlistId,
         "rename",
@@ -218,7 +220,7 @@ export function createPlaylistEditOperations(execFn?: ExecFn) {
       ),
     // Music sometimes answers delete with an AppleEvent timeout (-1712) after it has deleted the
     // playlist, so a timeout counts as success once the playlist is gone.
-    delete: (playlistId: string) =>
+    delete:  async (playlistId: string) =>
       editPlaylist(
         playlistId,
         "delete",
@@ -255,13 +257,9 @@ function toPlaylist(info: PlaylistInfo): Playlist {
 }
 
 export const renamePlaylistTool = defineTool({
-  name: "music.rename_playlist",
+  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
   description:
     "Rename a user playlist or folder. Built-in playlists are refused. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  inputSchema: renamePlaylistInputSchema,
-  outputSchema: renamePlaylistOutputSchema,
-  annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
-  writesRequired: true,
   dryRunResult({ playlistId, name }) {
     return {
       playlist: { id: playlistId, name, isSmart: false, trackCount: 0 },
@@ -273,19 +271,19 @@ export const renamePlaylistTool = defineTool({
     );
     return { structuredContent: { playlist }, logData: { playlistId } };
   },
+  inputSchema: renamePlaylistInputSchema,
+  name: "music.rename_playlist",
+  outputSchema: renamePlaylistOutputSchema,
+  writesRequired: true,
 });
 
 export function createDeletePlaylistTool(
   operations: PlaylistEditOperations = playlistEditOperations
 ) {
   return defineTool({
-    name: "music.delete_playlist",
+    annotations: DESTRUCTIVE_WRITE_ANNOTATIONS,
     description:
       "Delete a user playlist after the user confirms. Folders are refused. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.\nClients that support elicitation always show a confirmation prompt; other clients must pass confirm: true.",
-    inputSchema: deletePlaylistInputSchema,
-    outputSchema: deletePlaylistOutputSchema,
-    annotations: DESTRUCTIVE_WRITE_ANNOTATIONS,
-    writesRequired: true,
     dryRunResult({ playlistId }) {
       return { deletedPlaylistId: playlistId, name: "DRY_RUN_PLAYLIST" };
     },
@@ -342,6 +340,10 @@ export function createDeletePlaylistTool(
         },
       };
     },
+    inputSchema: deletePlaylistInputSchema,
+    name: "music.delete_playlist",
+    outputSchema: deletePlaylistOutputSchema,
+    writesRequired: true,
   });
 }
 

@@ -7,10 +7,10 @@ import * as z from "zod/v4";
 export const SERVER_NAME = "apple-music-mcp";
 
 function readServerVersion(): string {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
+  const currentDir = import.meta.dirname;
   const packageJsonPath = resolve(currentDir, "../package.json");
   try {
-    const raw = readFileSync(packageJsonPath, "utf8");
+    const raw = readFileSync(packageJsonPath, "utf-8");
     const parsed = JSON.parse(raw) as { version?: string };
     if (
       typeof parsed.version === "string" &&
@@ -41,7 +41,7 @@ export const persistentIdSchema = z
 
 export function readBooleanEnv(name: string): boolean {
   const value = process.env[name];
-  if (!value) return false;
+  if (!value) {return false;}
   const normalized = value.trim().toLowerCase();
   return (
     normalized === "1" ||
@@ -52,8 +52,8 @@ export function readBooleanEnv(name: string): boolean {
 }
 
 export const runtimeConfig = Object.freeze({
-  writesEnabled: readBooleanEnv("APPLE_MUSIC_MCP_ENABLE_WRITES"),
   dryRun: readBooleanEnv("APPLE_MUSIC_MCP_DRY_RUN"),
+  writesEnabled: readBooleanEnv("APPLE_MUSIC_MCP_ENABLE_WRITES"),
 });
 
 export type RuntimeConfig = typeof runtimeConfig;

@@ -5,13 +5,13 @@ import { getNowPlaying } from "./tools/playback.js";
 
 // The catalogue is fixed for the process lifetime: env flags are read once at startup.
 export const STATIC_CATALOGUE_CACHE_HINT = Object.freeze({
-  ttlMs: 3_600_000,
   cacheScope: "private",
+  ttlMs: 3_600_000,
 } satisfies CacheHint);
 
 const LIVE_CACHE_HINT = Object.freeze({
-  ttlMs: 0,
   cacheScope: "private",
+  ttlMs: 0,
 } satisfies CacheHint);
 
 const SERVER_GUIDE = `# Apple Music MCP guide
@@ -33,15 +33,15 @@ export function registerResources(server: McpServer): void {
     "apple-music-guide",
     "music://guide",
     {
-      title: "Apple Music MCP guide",
+      cacheHint: STATIC_CATALOGUE_CACHE_HINT,
       description:
         "Safe usage, identifiers, and write controls for this server.",
       mimeType: "text/markdown",
-      cacheHint: STATIC_CATALOGUE_CACHE_HINT,
+      title: "Apple Music MCP guide",
     },
     async (uri) => ({
       contents: [
-        { uri: uri.href, mimeType: "text/markdown", text: SERVER_GUIDE },
+        { mimeType: "text/markdown", text: SERVER_GUIDE, uri: uri.href },
       ],
     })
   );
@@ -50,17 +50,17 @@ export function registerResources(server: McpServer): void {
     "now-playing",
     "music://now-playing",
     {
-      title: "Now playing",
+      cacheHint: LIVE_CACHE_HINT,
       description: "The current Apple Music track and playback state.",
       mimeType: "application/json",
-      cacheHint: LIVE_CACHE_HINT,
+      title: "Now playing",
     },
     async (uri) => ({
       contents: [
         {
-          uri: uri.href,
           mimeType: "application/json",
           text: JSON.stringify(await getNowPlaying()),
+          uri: uri.href,
         },
       ],
     })
@@ -71,9 +71,6 @@ export function registerPrompts(server: McpServer): void {
   server.registerPrompt(
     "curate-playlist",
     {
-      title: "Curate a playlist",
-      description:
-        "Plan and create a bounded playlist from the local Apple Music library.",
       argsSchema: z.object({
         theme: z
           .string()
@@ -87,13 +84,14 @@ export function registerPrompts(server: McpServer): void {
           .optional()
           .describe("Optional playlist name."),
       }),
+      description:
+        "Plan and create a bounded playlist from the local Apple Music library.",
+      title: "Curate a playlist",
     },
     ({ theme, name }) => ({
       messages: [
         {
-          role: "user" as const,
           content: {
-            type: "text" as const,
             text: [
               `Curate an Apple Music playlist around: ${theme}.`,
               name
@@ -103,7 +101,9 @@ export function registerPrompts(server: McpServer): void {
               "Show the proposed tracks before creating anything unless I already approved creation.",
               "Use music.create_playlist_from_criteria only after approval and report partial failures.",
             ].join("\n"),
+            type: "text" as const,
           },
+          role: "user" as const,
         },
       ],
     })
@@ -112,18 +112,18 @@ export function registerPrompts(server: McpServer): void {
   server.registerPrompt(
     "library-overview",
     {
-      title: "Summarize my library",
       description:
         "Inspect playlists, folders, and playback without changing Apple Music.",
+      title: "Summarize my library",
     },
     () => ({
       messages: [
         {
-          role: "user" as const,
           content: {
-            type: "text" as const,
             text: "Call music.health, music.get_now_playing, music.list_folders, and music.list_playlists. Summarize my Apple Music library and current playback. Do not call write tools.",
+            type: "text" as const,
           },
+          role: "user" as const,
         },
       ],
     })

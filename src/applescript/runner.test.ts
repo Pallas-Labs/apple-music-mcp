@@ -35,66 +35,66 @@ describe("parseAppleScriptErrorNumber", () => {
 
 describe("mapAppleScriptError", () => {
   test("maps ETIMEDOUT to timeout", () => {
-    const mapped = mapAppleScriptError({ stderr: "", code: "ETIMEDOUT" });
+    const mapped = mapAppleScriptError({ code: "ETIMEDOUT", stderr: "" });
     expect(mapped.code).toBe("timeout");
   });
 
   test("maps SIGTERM to timeout", () => {
-    const mapped = mapAppleScriptError({ stderr: "", signal: "SIGTERM" });
+    const mapped = mapAppleScriptError({ signal: "SIGTERM", stderr: "" });
     expect(mapped.code).toBe("timeout");
   });
 
   test("maps -1743 to permission_denied", () => {
     const mapped = mapAppleScriptError({
-      stderr: "execution error (-1743)",
       code: "1",
+      stderr: "execution error (-1743)",
     });
     expect(mapped.code).toBe("permission_denied");
   });
 
   test("maps -10004 to permission_denied", () => {
     const mapped = mapAppleScriptError({
-      stderr: "execution error (-10004)",
       code: "1",
+      stderr: "execution error (-10004)",
     });
     expect(mapped.code).toBe("permission_denied");
   });
 
   test("maps -600 to music_not_running", () => {
-    const mapped = mapAppleScriptError({ stderr: "error (-600)", code: "1" });
+    const mapped = mapAppleScriptError({ code: "1", stderr: "error (-600)" });
     expect(mapped.code).toBe("music_not_running");
   });
 
   test("maps -1728 with app reference to music_not_running", () => {
     const mapped = mapAppleScriptError({
-      stderr: 'Can\'t get application id "com.apple.Music". (-1728)',
       code: "1",
+      stderr: 'Can\'t get application id "com.apple.Music". (-1728)',
     });
     expect(mapped.code).toBe("music_not_running");
   });
 
   test("maps -1728 without app reference to not_found", () => {
     const mapped = mapAppleScriptError({
+      code: "1",
       stderr:
         'Can\'t get first user playlist whose persistent ID is "ABC". (-1728)',
-      code: "1",
     });
     expect(mapped.code).toBe("not_found");
   });
 
   test("maps -1728 entity errors with trailing app context to not_found", () => {
     const mapped = mapAppleScriptError({
+      code: "1",
       stderr:
         'Can\'t get first user playlist whose persistent ID is "ABC" of application "Music". (-1728)',
-      code: "1",
     });
     expect(mapped.code).toBe("not_found");
   });
 
   test("maps unknown error to script_error", () => {
     const mapped = mapAppleScriptError({
-      stderr: "something weird",
       code: "1",
+      stderr: "something weird",
     });
     expect(mapped.code).toBe("script_error");
   });
@@ -102,7 +102,7 @@ describe("mapAppleScriptError", () => {
 
 describe("runAppleScript", () => {
   test("returns stdout/stderr from exec function", async () => {
-    const mockExec: ExecFn = async () => ({ stdout: "hello", stderr: "" });
+    const mockExec: ExecFn = async () => ({ stderr: "", stdout: "hello" });
     const result = await runAppleScript("script", 5000, mockExec);
     expect(result.stdout).toBe("hello");
   });
@@ -127,13 +127,13 @@ describe("runAppleScript", () => {
     const received: unknown[] = [];
     const mockExec: ExecFn = async (script, timeout, language) => {
       received.push([script, timeout, language]);
-      return { stdout: "", stderr: "" };
+      return { stderr: "", stdout: "" };
     };
     await runAppleScript("test-script", 42_000, mockExec);
-    await runJavaScript("js-script", 7_000, mockExec);
+    await runJavaScript("js-script", 7000, mockExec);
     expect(received).toEqual([
       ["test-script", 42_000, "AppleScript"],
-      ["js-script", 7_000, "JavaScript"],
+      ["js-script", 7000, "JavaScript"],
     ]);
   });
 
@@ -152,15 +152,15 @@ describe("runAppleScript", () => {
   });
 
   test("normalizes quoted scalar stdout", async () => {
-    const mockExec: ExecFn = async () => ({ stdout: '"running"', stderr: "" });
+    const mockExec: ExecFn = async () => ({ stderr: "", stdout: '"running"' });
     const result = await runAppleScript("script", 5000, mockExec);
     expect(result.stdout).toBe("running");
   });
 
   test("normalizes quoted JSON-string stdout", async () => {
     const mockExec: ExecFn = async () => ({
-      stdout: '"[{\\"id\\":\\"A\\"}]"',
       stderr: "",
+      stdout: '"[{\\"id\\":\\"A\\"}]"',
     });
     const result = await runAppleScript("script", 5000, mockExec);
     expect(result.stdout).toBe('[{"id":"A"}]');
