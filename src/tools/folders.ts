@@ -53,53 +53,28 @@ const createFolderOutputSchema = z.object({
   folder: folderSchema,
 });
 
-export const listFoldersTool = defineTool({
-  annotations: READ_ONLY_ANNOTATIONS,
-  description:
-    "List Apple Music folder playlists with their persistent IDs and parent folder IDs.",
-  async handler({ includeEmpty = true }) {
-    const folders = await folderOperations.listFolders(includeEmpty);
-    return {
-      structuredContent: { folders },
-      logData: { folderCount: folders.length, includeEmpty },
-    };
-  },
-  inputSchema: listFoldersInputSchema,
-  name: "music.list_folders",
-  outputSchema: listFoldersOutputSchema,
-  writesRequired: false,
-});
+const toFolder = (row: z.output<typeof folderRowSchema>): Folder => {
+  const parentId = row.parentId.trim();
+  const folder: Folder = {
+    id: row.id,
+    isRoot: parentId.length === 0,
+    name: row.name,
+  };
+  if (parentId.length > 0) {
+    folder.parentId = parentId;
+  }
+  return folder;
+};
 
-export const createFolderTool = defineTool({
-  annotations: ADDITIVE_WRITE_ANNOTATIONS,
-  description:
-    "Create a folder playlist, optionally inside a parent folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  dryRunResult({ name, parentId }) {
-    return {
-      folder: {
-        id: `DRYRUN_${Date.now()}`,
-        name,
-        isRoot: parentId === undefined,
-        ...(parentId !== undefined ? { parentId } : {}),
-      },
-    };
-  },
-  async handler({ name, parentId }) {
-    const input: { name: string; parentId?: string } = { name };
-    if (parentId !== undefined) input.parentId = parentId;
-    const folder = await folderOperations.createFolder(input);
-    return { structuredContent: { folder }, logData: { folderId: folder.id } };
-  },
-  inputSchema: createFolderInputSchema,
-  name: "music.create_folder",
-  outputSchema: createFolderOutputSchema,
-  writesRequired: true,
-});
+interface CreateFolderInput {
+  name: string;
+  parentId?: string | undefined;
+}
 
-async function listFolders(
+const listFolders = async (
   includeEmpty: boolean,
   execFn: ExecFn | undefined
-): Promise<Folder[]> {
+): Promise<Folder[]> => {
   const entries = await readPlaylistEntries(execFn);
   const folders = entries.filter((entry) => entry.kind === "folder");
   // A folder counts as empty when no user playlist sits directly inside it.
@@ -117,12 +92,12 @@ async function listFolders(
     .map((folder) =>
       toFolder({ ...folder, parentId: parentIds.get(folder.id) ?? "" })
     );
-}
+};
 
-async function createFolder(
-  input: { name: string; parentId?: string },
+const createFolder = async (
+  input: CreateFolderInput,
   execFn: ExecFn | undefined
-): Promise<Folder> {
+): Promise<Folder> => {
   const safeName = escapeAppleScriptString(input.name);
   const safeParentId = escapeAppleScriptString(input.parentId ?? "");
   const body = `
@@ -162,25 +137,55 @@ end jsonFolder`;
       "Music returned an invalid create folder payload."
     )
   );
-}
+};
 
-function toFolder(row: z.output<typeof folderRowSchema>): Folder {
-  const parentId = row.parentId.trim();
-  return {
-    id: row.id,
-    isRoot: parentId.length === 0,
-    name: row.name,
-    ...(parentId.length > 0 ? { parentId } : {}),
-  };
-}
-
-export function createFolderOperations(execFn?: ExecFn) {
-  return {
-    createFolder: async (input: { name: string; parentId?: string }) =>
-      createFolder(input, execFn),
-    listFolders: async (includeEmpty: boolean) =>
-      listFolders(includeEmpty, execFn),
-  };
-}
+export const createFolderOperations = (execFn?: ExecFn) => ({
+  createFolder: async (input: CreateFolderInput) =>
+    await createFolder(input, execFn),
+  listFolders: async (includeEmpty: boolean) =>
+    await listFolders(includeEmpty, execFn),
+});
 
 const folderOperations = createFolderOperations();
+
+export const listFoldersTool = defineTool({
+  annotations: READ_ONLY_ANNOTATIONS,
+  description:
+    "List Apple Music folder playlists with their persistent IDs and parent folder IDs.",
+  async handler({ includeEmpty = true }) {
+    const folders = await folderOperations.listFolders(includeEmpty);
+    return {
+      logData: { folderCount: folders.length, includeEmpty },
+      structuredContent: { folders },
+    };
+  },
+  inputSchema: listFoldersInputSchema,
+  name: "music.list_folders",
+  outputSchema: listFoldersOutputSchema,
+  writesRequired: false,
+});
+
+export const createFolderTool = defineTool({
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
+  description:
+    "Create a folder playlist, optionally inside a parent folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
+  dryRunResult({ name, parentId }) {
+    const folder: Folder = {
+      id: `DRYRUN_${Date.now()}`,
+      isRoot: parentId === undefined,
+      name,
+    };
+    if (parentId !== undefined) {
+      folder.parentId = parentId;
+    }
+    return { folder };
+  },
+  async handler({ name, parentId }) {
+    const folder = await folderOperations.createFolder({ name, parentId });
+    return { logData: { folderId: folder.id }, structuredContent: { folder } };
+  },
+  inputSchema: createFolderInputSchema,
+  name: "music.create_folder",
+  outputSchema: createFolderOutputSchema,
+  writesRequired: true,
+});

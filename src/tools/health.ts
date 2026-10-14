@@ -5,7 +5,7 @@ import { SERVER_VERSION } from "../config.js";
 import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
 import { MusicToolError } from "../types.js";
 
-async function isMusicRunning(): Promise<boolean> {
+const isMusicRunning = async (): Promise<boolean> => {
   const script = `
 try
     if application "Music" is running then
@@ -19,9 +19,9 @@ end try
 `;
   const result = await runAppleScript(script, 2000);
   return result.stdout === "running";
-}
+};
 
-async function checkMusicPermission(): Promise<boolean> {
+const checkMusicPermission = async (): Promise<boolean> => {
   const script = `
 try
     tell application "Music" to launch
@@ -48,9 +48,9 @@ end try
     return false;
   }
   return true;
-}
+};
 
-async function getMusicHealth() {
+const getMusicHealth = async () => {
   const musicRunning = await isMusicRunning();
   let permissionGranted = false;
 
@@ -71,7 +71,7 @@ async function getMusicHealth() {
   }
 
   return { musicRunning, permissionGranted, serverVersion: SERVER_VERSION };
-}
+};
 
 const healthInputSchema = z.object({});
 const healthOutputSchema = z.object({
@@ -100,15 +100,15 @@ export const healthTool = defineTool({
     const health = await getMusicHealth();
     const response = {
       ...health,
-      writesEnabled: config.writesEnabled,
       dryRun: config.dryRun,
+      writesEnabled: config.writesEnabled,
     };
     return {
-      structuredContent: response,
       logData: {
         musicRunning: health.musicRunning,
         permissionGranted: health.permissionGranted,
       },
+      structuredContent: response,
     };
   },
   inputSchema: healthInputSchema,

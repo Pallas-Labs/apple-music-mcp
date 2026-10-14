@@ -38,32 +38,15 @@ const searchLibraryOutputSchema = z.object({
   ),
 });
 
-export const searchLibraryTool = defineTool({
-  annotations: READ_ONLY_ANNOTATIONS,
-  description:
-    "Search the Apple Music library for tracks by text and return up to 50 matches with persistent IDs.",
-  async handler({ query, limit }) {
-    const tracks = await searchOperations.searchLibrary(query, limit ?? 50);
-    return {
-      structuredContent: { tracks },
-      logData: { query, resultCount: tracks.length },
-    };
-  },
-  inputSchema: searchLibraryInputSchema,
-  name: "music.search_library",
-  outputSchema: searchLibraryOutputSchema,
-  writesRequired: false,
-});
-
 type SearchResult = ToolSchemaOutput<
   typeof searchLibraryOutputSchema
 >["tracks"];
 
-async function searchLibrary(
+const searchLibrary = async (
   query: string,
   limit: number,
   execFn: ExecFn | undefined
-): Promise<SearchResult> {
+): Promise<SearchResult> => {
   const safeQuery = escapeAppleScriptString(query);
   const body = `
 try
@@ -115,13 +98,28 @@ end jsonTracks`;
     searchLibraryOutputSchema.shape.tracks,
     "Music returned an invalid search payload."
   );
-}
+};
 
-export function createSearchOperations(execFn?: ExecFn) {
-  return {
-    searchLibrary: async (query: string, limit: number) =>
-      searchLibrary(query, limit, execFn),
-  };
-}
+export const createSearchOperations = (execFn?: ExecFn) => ({
+  searchLibrary: async (query: string, limit: number) =>
+    await searchLibrary(query, limit, execFn),
+});
 
 const searchOperations = createSearchOperations();
+
+export const searchLibraryTool = defineTool({
+  annotations: READ_ONLY_ANNOTATIONS,
+  description:
+    "Search the Apple Music library for tracks by text and return up to 50 matches with persistent IDs.",
+  async handler({ query, limit }) {
+    const tracks = await searchOperations.searchLibrary(query, limit ?? 50);
+    return {
+      logData: { query, resultCount: tracks.length },
+      structuredContent: { tracks },
+    };
+  },
+  inputSchema: searchLibraryInputSchema,
+  name: "music.search_library",
+  outputSchema: searchLibraryOutputSchema,
+  writesRequired: false,
+});

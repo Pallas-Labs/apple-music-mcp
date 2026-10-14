@@ -117,176 +117,22 @@ const createPlaylistFromCriteriaOutputSchema = z.object({
   truncated: truncatedOutputSchema,
 });
 
-export function createPlaylistOperations(execFn?: ExecFn) {
-  return {
-    createPlaylist: async (input: { name: string; folderId?: string }) =>
-      createPlaylist(input, execFn),
-    listPlaylists: async (input: {
-      folderId?: string;
-      includeRoot?: boolean;
-    }) => listPlaylists(input, execFn),
-  };
+interface ListPlaylistsInput {
+  folderId?: string | undefined;
+  includeRoot?: boolean | undefined;
 }
 
-const playlistOperations = createPlaylistOperations();
-
-export const listPlaylistsTool = defineTool({
-  annotations: READ_ONLY_ANNOTATIONS,
-  description:
-    "List Apple Music user playlists with their persistent IDs, optionally only those inside one folder.",
-  async handler({ folderId, includeRoot }) {
-    const input: { folderId?: string; includeRoot?: boolean } = {};
-    if (folderId !== undefined) input.folderId = folderId;
-    if (includeRoot !== undefined) input.includeRoot = includeRoot;
-    const playlists = await playlistOperations.listPlaylists(input);
-    return {
-      structuredContent: { playlists },
-      logData: {
-        playlistCount: playlists.length,
-        hasFolderFilter: Boolean(folderId),
-      },
-    };
-  },
-  inputSchema: listPlaylistsInputSchema,
-  name: "music.list_playlists",
-  outputSchema: listPlaylistsOutputSchema,
-  writesRequired: false,
-});
-
-export const createPlaylistTool = defineTool({
-  annotations: ADDITIVE_WRITE_ANNOTATIONS,
-  description:
-    "Create an empty user playlist, optionally inside a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
-  dryRunResult({ name, folderId }) {
-    return {
-      playlist: {
-        id: `DRYRUN_${Date.now()}`,
-        name,
-        ...(folderId !== undefined ? { folderId } : {}),
-        isSmart: false,
-        trackCount: 0,
-      },
-    };
-  },
-  async handler({ name, folderId }) {
-    const input: { name: string; folderId?: string } = { name };
-    if (folderId !== undefined) input.folderId = folderId;
-    const playlist = await playlistOperations.createPlaylist(input);
-    return {
-      structuredContent: { playlist },
-      logData: { playlistId: playlist.id, hasFolderTarget: Boolean(folderId) },
-    };
-  },
-  inputSchema: createPlaylistInputSchema,
-  name: "music.create_playlist",
-  outputSchema: createPlaylistOutputSchema,
-  writesRequired: true,
-});
-
-interface CriteriaPlaylistOperations {
-  findTracks: typeof findTracks;
-  createPlaylist: (typeof playlistOperations)["createPlaylist"];
-  addTracksToPlaylist: typeof addTracksToPlaylist;
+interface CreatePlaylistInput {
+  name: string;
+  folderId?: string | undefined;
 }
 
-export function createCriteriaPlaylistTool(
-  operations: CriteriaPlaylistOperations = {
-    addTracksToPlaylist,
-    createPlaylist: playlistOperations.createPlaylist,
-    findTracks,
-  }
-) {
-  return defineTool({
-    annotations: ADDITIVE_WRITE_ANNOTATIONS,
-    description:
-      "Create a playlist and add the tracks music.find_tracks would return for the same criteria.\nRequires APPLE_MUSIC_MCP_ENABLE_WRITES=true. Bulk adds are not atomic; check the returned ID lists.",
-    dryRunResult({ name, folderId }) {
-      return {
-        playlist: {
-          id: `DRYRUN_${Date.now()}`,
-          name,
-          ...(folderId !== undefined ? { folderId } : {}),
-          isSmart: false,
-          trackCount: 0,
-        },
-        matched: 0,
-        requested: 0,
-        added: 0,
-        addedTrackIds: [],
-        missingTrackIds: [],
-        failedTrackIds: [],
-        scanned: 0,
-        truncated: false,
-      };
-    },
-    async handler({ name, folderId, criteria }) {
-      // The library scan can take up to two minutes, so only the create and add hold the lock.
-      const tracks = await operations.findTracks(criteria);
-      const createInput: { name: string; folderId?: string } = { name };
-      if (folderId !== undefined) createInput.folderId = folderId;
-      const { playlist, addResult } = await withMutationLock(async () => {
-        const playlist = await operations.createPlaylist(createInput);
-        const addResult: AddTracksResult =
-          tracks.tracks.length === 0
-            ? {
-                playlistId: playlist.id,
-                requested: 0,
-                added: 0,
-                addedTrackIds: [],
-                missingTrackIds: [],
-                failedTrackIds: [],
-              }
-            : await operations.addTracksToPlaylist(
-                playlist.id,
-                tracks.tracks.map((track) => track.id)
-              );
-        return { playlist, addResult };
-      });
-
-      return {
-        structuredContent: {
-          playlist: {
-            ...playlist,
-            trackCount: addResult.added,
-          },
-          matched: tracks.totalMatched,
-          requested: addResult.requested,
-          added: addResult.added,
-          addedTrackIds: addResult.addedTrackIds,
-          missingTrackIds: addResult.missingTrackIds,
-          failedTrackIds: addResult.failedTrackIds,
-          scanned: tracks.scanned,
-          truncated: tracks.truncated,
-        },
-        logData: {
-          playlistId: playlist.id,
-          matched: tracks.totalMatched,
-          requested: addResult.requested,
-          added: addResult.added,
-          missingCount: addResult.missingTrackIds.length,
-          failedCount: addResult.failedTrackIds.length,
-          scanned: tracks.scanned,
-          truncated: tracks.truncated,
-        },
-      };
-    },
-    inputSchema: createPlaylistFromCriteriaInputSchema,
-    lock: "handler",
-    name: "music.create_playlist_from_criteria",
-    outputSchema: createPlaylistFromCriteriaOutputSchema,
-    writesRequired: true,
-  });
-}
-
-export const createPlaylistFromCriteriaTool = createCriteriaPlaylistTool();
-
-async function listPlaylists(
-  input: { folderId?: string; includeRoot?: boolean },
+const listPlaylists = async (
+  input: ListPlaylistsInput,
   execFn: ExecFn | undefined
-): Promise<Playlist[]> {
-  const playlists = (await readPlaylistEntries(execFn)).filter(
-    (entry) => entry.kind === "user"
-  );
+): Promise<Playlist[]> => {
+  const entries = await readPlaylistEntries(execFn);
+  const playlists = entries.filter((entry) => entry.kind === "user");
   const parentIds = await readParentIds(
     playlists.map((playlist) => playlist.id),
     execFn
@@ -300,14 +146,18 @@ async function listPlaylists(
     if (input.folderId === undefined && !includeRoot && folderId === "") {
       return [];
     }
-    return [{ id, isSmart, name, ...(folderId === "" ? {} : { folderId }) }];
+    const playlist: Playlist = { id, isSmart, name };
+    if (folderId !== "") {
+      playlist.folderId = folderId;
+    }
+    return [playlist];
   });
-}
+};
 
-async function createPlaylist(
-  input: { name: string; folderId?: string },
+const createPlaylist = async (
+  input: CreatePlaylistInput,
   execFn: ExecFn | undefined
-): Promise<Playlist> {
+): Promise<Playlist> => {
   const safeName = escapeAppleScriptString(input.name);
   const safeFolderId = escapeAppleScriptString(input.folderId ?? "");
   const body = `
@@ -357,4 +207,165 @@ end jsonPlaylist`;
     output.folderId = folderId;
   }
   return output;
+};
+
+export const createPlaylistOperations = (execFn?: ExecFn) => ({
+  createPlaylist: async (input: CreatePlaylistInput) =>
+    await createPlaylist(input, execFn),
+  listPlaylists: async (input: ListPlaylistsInput) =>
+    await listPlaylists(input, execFn),
+});
+
+const playlistOperations = createPlaylistOperations();
+
+export const listPlaylistsTool = defineTool({
+  annotations: READ_ONLY_ANNOTATIONS,
+  description:
+    "List Apple Music user playlists with their persistent IDs, optionally only those inside one folder.",
+  async handler({ folderId, includeRoot }) {
+    const playlists = await playlistOperations.listPlaylists({
+      folderId,
+      includeRoot,
+    });
+    return {
+      logData: {
+        hasFolderFilter: Boolean(folderId),
+        playlistCount: playlists.length,
+      },
+      structuredContent: { playlists },
+    };
+  },
+  inputSchema: listPlaylistsInputSchema,
+  name: "music.list_playlists",
+  outputSchema: listPlaylistsOutputSchema,
+  writesRequired: false,
+});
+
+const dryRunPlaylist = (
+  name: string,
+  folderId: string | undefined
+): Playlist => {
+  const playlist: Playlist = {
+    id: `DRYRUN_${Date.now()}`,
+    isSmart: false,
+    name,
+    trackCount: 0,
+  };
+  if (folderId !== undefined) {
+    playlist.folderId = folderId;
+  }
+  return playlist;
+};
+
+export const createPlaylistTool = defineTool({
+  annotations: ADDITIVE_WRITE_ANNOTATIONS,
+  description:
+    "Create an empty user playlist, optionally inside a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
+  dryRunResult({ name, folderId }) {
+    return { playlist: dryRunPlaylist(name, folderId) };
+  },
+  async handler({ name, folderId }) {
+    const playlist = await playlistOperations.createPlaylist({
+      folderId,
+      name,
+    });
+    return {
+      logData: { hasFolderTarget: Boolean(folderId), playlistId: playlist.id },
+      structuredContent: { playlist },
+    };
+  },
+  inputSchema: createPlaylistInputSchema,
+  name: "music.create_playlist",
+  outputSchema: createPlaylistOutputSchema,
+  writesRequired: true,
+});
+
+interface CriteriaPlaylistOperations {
+  findTracks: typeof findTracks;
+  createPlaylist: (typeof playlistOperations)["createPlaylist"];
+  addTracksToPlaylist: typeof addTracksToPlaylist;
 }
+
+const criteriaPlaylistOperations: CriteriaPlaylistOperations = {
+  addTracksToPlaylist,
+  createPlaylist: playlistOperations.createPlaylist,
+  findTracks,
+};
+
+export const createCriteriaPlaylistTool = (
+  operations: CriteriaPlaylistOperations = criteriaPlaylistOperations
+) =>
+  defineTool({
+    annotations: ADDITIVE_WRITE_ANNOTATIONS,
+    description:
+      "Create a playlist and add the tracks music.find_tracks would return for the same criteria.\nRequires APPLE_MUSIC_MCP_ENABLE_WRITES=true. Bulk adds are not atomic; check the returned ID lists.",
+    dryRunResult({ name, folderId }) {
+      return {
+        added: 0,
+        addedTrackIds: [],
+        failedTrackIds: [],
+        matched: 0,
+        missingTrackIds: [],
+        playlist: dryRunPlaylist(name, folderId),
+        requested: 0,
+        scanned: 0,
+        truncated: false,
+      };
+    },
+    async handler({ name, folderId, criteria }) {
+      // The library scan can take up to two minutes, so only the create and add hold the lock.
+      const tracks = await operations.findTracks(criteria);
+      const { playlist, addResult } = await withMutationLock(async () => {
+        const created = await operations.createPlaylist({ folderId, name });
+        const added: AddTracksResult =
+          tracks.tracks.length === 0
+            ? {
+                added: 0,
+                addedTrackIds: [],
+                failedTrackIds: [],
+                missingTrackIds: [],
+                playlistId: created.id,
+                requested: 0,
+              }
+            : await operations.addTracksToPlaylist(
+                created.id,
+                tracks.tracks.map((track) => track.id)
+              );
+        return { addResult: added, playlist: created };
+      });
+
+      return {
+        logData: {
+          added: addResult.added,
+          failedCount: addResult.failedTrackIds.length,
+          matched: tracks.totalMatched,
+          missingCount: addResult.missingTrackIds.length,
+          playlistId: playlist.id,
+          requested: addResult.requested,
+          scanned: tracks.scanned,
+          truncated: tracks.truncated,
+        },
+        structuredContent: {
+          added: addResult.added,
+          addedTrackIds: addResult.addedTrackIds,
+          failedTrackIds: addResult.failedTrackIds,
+          matched: tracks.totalMatched,
+          missingTrackIds: addResult.missingTrackIds,
+          playlist: {
+            ...playlist,
+            trackCount: addResult.added,
+          },
+          requested: addResult.requested,
+          scanned: tracks.scanned,
+          truncated: tracks.truncated,
+        },
+      };
+    },
+    inputSchema: createPlaylistFromCriteriaInputSchema,
+    lock: "handler",
+    name: "music.create_playlist_from_criteria",
+    outputSchema: createPlaylistFromCriteriaOutputSchema,
+    writesRequired: true,
+  });
+
+export const createPlaylistFromCriteriaTool = createCriteriaPlaylistTool();

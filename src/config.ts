@@ -1,32 +1,31 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 import * as z from "zod/v4";
 
 export const SERVER_NAME = "apple-music-mcp";
 
-function readServerVersion(): string {
-  const currentDir = import.meta.dirname;
-  const packageJsonPath = resolve(currentDir, "../package.json");
+const PackageJsonSchema = z.object({
+  version: z.string().refine((version) => version.trim().length > 0),
+});
+
+const readServerVersion = (): string => {
+  const packageJsonPath = path.resolve(import.meta.dirname, "../package.json");
   try {
     const raw = readFileSync(packageJsonPath, "utf-8");
-    const parsed = JSON.parse(raw) as { version?: string };
-    if (
-      typeof parsed.version === "string" &&
-      parsed.version.trim().length > 0
-    ) {
-      return parsed.version;
+    const parsed = PackageJsonSchema.safeParse(JSON.parse(raw));
+    if (parsed.success) {
+      return parsed.data.version;
     }
   } catch {
     // Fall back to a safe default if package.json cannot be read.
   }
   return "0.1.0";
-}
+};
 
 export const SERVER_VERSION = readServerVersion();
 
-const ID_PATTERN = /^[A-Za-z0-9]{8,32}$/;
+const ID_PATTERN = /^[A-Za-z0-9]{8,32}$/u;
 
 export const nameSchema = z
   .string()
@@ -39,9 +38,9 @@ export const persistentIdSchema = z
   .trim()
   .regex(ID_PATTERN, "Expected a persistent ID-like string.");
 
-export function readBooleanEnv(name: string): boolean {
+export const readBooleanEnv = (name: string): boolean => {
   const value = process.env[name];
-  if (!value) {
+  if (value === undefined || value === "") {
     return false;
   }
   const normalized = value.trim().toLowerCase();
@@ -51,7 +50,7 @@ export function readBooleanEnv(name: string): boolean {
     normalized === "yes" ||
     normalized === "on"
   );
-}
+};
 
 export const runtimeConfig = Object.freeze({
   dryRun: readBooleanEnv("APPLE_MUSIC_MCP_DRY_RUN"),

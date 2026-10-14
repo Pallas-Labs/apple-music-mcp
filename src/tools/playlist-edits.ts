@@ -48,22 +48,6 @@ const EDIT_REFUSALS: Record<
   user: {},
 };
 
-function editableKinds(edit: PlaylistEdit): PlaylistKind[] {
-  return PLAYLIST_KINDS.filter(
-    (kind) => EDIT_REFUSALS[kind][edit] === undefined
-  );
-}
-
-function assertEditable(playlist: PlaylistInfo, edit: PlaylistEdit): void {
-  const refusal = EDIT_REFUSALS[playlist.kind][edit];
-  if (refusal !== undefined) {
-    throw new MusicToolError(
-      "validation_error",
-      `"${playlist.name}" ${refusal}`
-    );
-  }
-}
-
 const playlistInfoSchema = z.object({
   applied: z.boolean(),
   folderId: z.string(),
@@ -74,6 +58,19 @@ const playlistInfoSchema = z.object({
   trackCount: z.number().int(),
 });
 type PlaylistInfo = z.output<typeof playlistInfoSchema>;
+
+const editableKinds = (edit: PlaylistEdit): PlaylistKind[] =>
+  PLAYLIST_KINDS.filter((kind) => EDIT_REFUSALS[kind][edit] === undefined);
+
+const assertEditable = (playlist: PlaylistInfo, edit: PlaylistEdit): void => {
+  const refusal = EDIT_REFUSALS[playlist.kind][edit];
+  if (refusal !== undefined) {
+    throw new MusicToolError(
+      "validation_error",
+      `"${playlist.name}" ${refusal}`
+    );
+  }
+};
 
 const playlistScriptResultSchema = z.discriminatedUnion("found", [
   z.object({ found: z.literal(false) }),
@@ -115,10 +112,10 @@ const deleteConfirmationSchema = z.object({
  * Build a script that finds a playlist by ID, runs `edit` when the playlist's kind allows it, and
  * reports the playlist as JSON. Without an edit it only describes the playlist.
  */
-function buildPlaylistScript(
+const buildPlaylistScript = (
   playlistId: string,
   edit?: { kind: PlaylistEdit; statements: string }
-): string {
+): string => {
   const safeId = escapeAppleScriptString(playlistId);
   const allowedKinds = edit
     ? `{${editableKinds(edit.kind)
@@ -166,13 +163,13 @@ try
 on error errMsg number errNum
     error errMsg number errNum
 end try`);
-}
+};
 
-export function createPlaylistEditOperations(execFn?: ExecFn) {
-  async function runPlaylistScript(
+export const createPlaylistEditOperations = (execFn?: ExecFn) => {
+  const runPlaylistScript = async (
     playlistId: string,
     script: string
-  ): Promise<PlaylistInfo> {
+  ): Promise<PlaylistInfo> => {
     const result = await runAppleScript(script, 40_000, execFn);
     const parsed = parseAppleScriptJson(
       result.stdout,
@@ -187,13 +184,13 @@ export function createPlaylistEditOperations(execFn?: ExecFn) {
     }
     const { found: _found, ...info } = parsed;
     return info;
-  }
+  };
 
-  async function editPlaylist(
+  const editPlaylist = async (
     playlistId: string,
     edit: PlaylistEdit,
     statements: string
-  ): Promise<PlaylistInfo> {
+  ): Promise<PlaylistInfo> => {
     const info = await runPlaylistScript(
       playlistId,
       buildPlaylistScript(playlistId, { kind: edit, statements })
@@ -206,22 +203,13 @@ export function createPlaylistEditOperations(execFn?: ExecFn) {
       );
     }
     return info;
-  }
+  };
 
   return {
-    describe: async (playlistId: string) =>
-      runPlaylistScript(playlistId, buildPlaylistScript(playlistId)),
-    rename: async (playlistId: string, name: string) =>
-      editPlaylist(
-        playlistId,
-        "rename",
-        `set name of p to "${escapeAppleScriptString(name)}"
-                set pName to name of p as text`
-      ),
     // Music sometimes answers delete with an AppleEvent timeout (-1712) after it has deleted the
     // playlist, so a timeout counts as success once the playlist is gone.
     delete: async (playlistId: string) =>
-      editPlaylist(
+      await editPlaylist(
         playlistId,
         "delete",
         `try
@@ -235,26 +223,37 @@ export function createPlaylistEditOperations(execFn?: ExecFn) {
                     if (count of (every playlist whose persistent ID is pId)) is not 0 then error errMsg number errNum
                 end try`
       ),
+    describe: async (playlistId: string) =>
+      await runPlaylistScript(playlistId, buildPlaylistScript(playlistId)),
+    rename: async (playlistId: string, name: string) =>
+      await editPlaylist(
+        playlistId,
+        "rename",
+        `set name of p to "${escapeAppleScriptString(name)}"
+                set pName to name of p as text`
+      ),
   };
-}
+};
 
 type PlaylistEditOperations = ReturnType<typeof createPlaylistEditOperations>;
 
 const playlistEditOperations = createPlaylistEditOperations();
 
-function describeTracks(count: number): string {
-  return count === 1 ? "1 track" : `${count} tracks`;
-}
+const describeTracks = (count: number): string =>
+  count === 1 ? "1 track" : `${count} tracks`;
 
-function toPlaylist(info: PlaylistInfo): Playlist {
-  return {
+const toPlaylist = (info: PlaylistInfo): Playlist => {
+  const playlist: Playlist = {
     id: info.id,
-    name: info.name,
-    ...(info.folderId.length > 0 ? { folderId: info.folderId } : {}),
     isSmart: info.isSmart,
+    name: info.name,
     trackCount: info.trackCount,
   };
-}
+  if (info.folderId.length > 0) {
+    playlist.folderId = info.folderId;
+  }
+  return playlist;
+};
 
 export const renamePlaylistTool = defineTool({
   annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -262,14 +261,14 @@ export const renamePlaylistTool = defineTool({
     "Rename a user playlist or folder. Built-in playlists are refused. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
   dryRunResult({ playlistId, name }) {
     return {
-      playlist: { id: playlistId, name, isSmart: false, trackCount: 0 },
+      playlist: { id: playlistId, isSmart: false, name, trackCount: 0 },
     };
   },
   async handler({ playlistId, name }) {
     const playlist = toPlaylist(
       await playlistEditOperations.rename(playlistId, name)
     );
-    return { structuredContent: { playlist }, logData: { playlistId } };
+    return { logData: { playlistId }, structuredContent: { playlist } };
   },
   inputSchema: renamePlaylistInputSchema,
   name: "music.rename_playlist",
@@ -277,10 +276,10 @@ export const renamePlaylistTool = defineTool({
   writesRequired: true,
 });
 
-export function createDeletePlaylistTool(
+export const createDeletePlaylistTool = (
   operations: PlaylistEditOperations = playlistEditOperations
-) {
-  return defineTool({
+) =>
+  defineTool({
     annotations: DESTRUCTIVE_WRITE_ANNOTATIONS,
     description:
       "Delete a user playlist after the user confirms. Folders are refused. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.\nClients that support elicitation always show a confirmation prompt; other clients must pass confirm: true.",
@@ -329,14 +328,14 @@ export function createDeletePlaylistTool(
 
       const deleted = await operations.delete(playlistId);
       return {
+        logData: {
+          confirmedBy: canElicit ? "elicitation" : "argument",
+          playlistId,
+          trackCount: deleted.trackCount,
+        },
         structuredContent: {
           deletedPlaylistId: deleted.id,
           name: deleted.name,
-        },
-        logData: {
-          playlistId,
-          trackCount: deleted.trackCount,
-          confirmedBy: canElicit ? "elicitation" : "argument",
         },
       };
     },
@@ -345,6 +344,5 @@ export function createDeletePlaylistTool(
     outputSchema: deletePlaylistOutputSchema,
     writesRequired: true,
   });
-}
 
 export const deletePlaylistTool = createDeletePlaylistTool();

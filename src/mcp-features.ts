@@ -28,7 +28,7 @@ const SERVER_GUIDE = `# Apple Music MCP guide
 10. \`music.delete_playlist\` asks the user to confirm when the client supports elicitation. Other clients must pass \`confirm: true\`, and only after the user approves.
 `;
 
-export function registerResources(server: McpServer): void {
+export const registerResources = (server: McpServer): void => {
   server.registerResource(
     "apple-music-guide",
     "music://guide",
@@ -39,7 +39,7 @@ export function registerResources(server: McpServer): void {
       mimeType: "text/markdown",
       title: "Apple Music MCP guide",
     },
-    async (uri) => ({
+    (uri) => ({
       contents: [
         { mimeType: "text/markdown", text: SERVER_GUIDE, uri: uri.href },
       ],
@@ -65,25 +65,29 @@ export function registerResources(server: McpServer): void {
       ],
     })
   );
-}
+};
 
-export function registerPrompts(server: McpServer): void {
+export const registerPrompts = (server: McpServer): void => {
   server.registerPrompt(
     "curate-playlist",
     {
-      argsSchema: z.object({
-        theme: z
-          .string()
-          .trim()
-          .min(1)
-          .describe("Mood, genre, artist, era, or other theme."),
-        name: z
-          .string()
-          .trim()
-          .min(1)
-          .optional()
-          .describe("Optional playlist name."),
-      }),
+      // Built in two steps so `theme`, the required argument, stays first in prompts/list.
+      argsSchema: z
+        .object({
+          theme: z
+            .string()
+            .trim()
+            .min(1)
+            .describe("Mood, genre, artist, era, or other theme."),
+        })
+        .extend({
+          name: z
+            .string()
+            .trim()
+            .min(1)
+            .optional()
+            .describe("Optional playlist name."),
+        }),
       description:
         "Plan and create a bounded playlist from the local Apple Music library.",
       title: "Curate a playlist",
@@ -94,9 +98,9 @@ export function registerPrompts(server: McpServer): void {
           content: {
             text: [
               `Curate an Apple Music playlist around: ${theme}.`,
-              name
-                ? `Use the playlist name: ${name}.`
-                : "Choose a concise playlist name.",
+              name === undefined
+                ? "Choose a concise playlist name."
+                : `Use the playlist name: ${name}.`,
               "Call music.health first, then use music.find_tracks with explicit bounded criteria.",
               "Show the proposed tracks before creating anything unless I already approved creation.",
               "Use music.create_playlist_from_criteria only after approval and report partial failures.",
@@ -128,4 +132,4 @@ export function registerPrompts(server: McpServer): void {
       ],
     })
   );
-}
+};

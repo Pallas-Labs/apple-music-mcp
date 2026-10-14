@@ -1,8 +1,7 @@
+import { once } from "node:events";
 import { createServer as createHttpServer } from "node:http";
-import type { IncomingMessage } from "node:http";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { arrayBuffer } from "node:stream/consumers";
 
 import {
   createMcpHandler,
@@ -15,61 +14,99 @@ import { createServer } from "./server.js";
 const HOST = "127.0.0.1";
 const ENDPOINT = "/mcp";
 
-/**
- * Serve MCP over Streamable HTTP on 127.0.0.1. The Host check blocks DNS rebinding, and requests
- * that carry an Origin header are refused because only local clients, not web pages, may connect.
- */
-export function serveHttp(port: number): { close: () => Promise<void> } {
-  const handler = createMcpHandler(() => createServer());
-  const allowedHosts = localhostAllowedHostnames();
-
-  const server = createHttpServer(async (req, res) => {
-    const abort = new AbortController();
-    res.on("close", () => {
-      abort.abort();
-    });
-    const request = toRequest(req, abort.signal);
-    const response =
-      new URL(request.url).pathname === ENDPOINT
-        ? request.headers.has("origin")
-          ? new Response("Browser requests are not allowed", { status: 403 })
-          : (hostHeaderValidationResponse(request, allowedHosts) ??
-            (await handler.fetch(request)))
-        : new Response("Not found", { status: 404 });
-    res.writeHead(response.status, Object.fromEntries(response.headers));
-    if (response.body) {
-      await pipeline(
-        Readable.fromWeb(response.body as NodeReadableStream),
-        res
-      ).catch(() => {});
-    } else {
-      res.end();
-    }
-  });
-  server.listen(port, HOST);
-
-  return {
-    close: async () => {
-      await new Promise((resolve) => server.close(resolve));
-      await handler.close();
-    },
-  };
+export interface HttpServerHandle {
+  close: () => Promise<void>;
 }
 
-function toRequest(req: IncomingMessage, signal: AbortSignal): Request {
+const toRequest = async (
+  req: IncomingMessage,
+  url: string,
+  signal: AbortSignal
+): Promise<Request> => {
   const headers = new Headers();
   for (const [name, values] of Object.entries(req.headersDistinct)) {
     for (const value of values ?? []) {
       headers.append(name, value);
     }
   }
-  const hasBody = req.method !== "GET" && req.method !== "HEAD";
-  return new Request(`http://${req.headers.host ?? HOST}${req.url ?? "/"}`, {
-    headers,
-    method: req.method ?? "GET",
-    signal,
-    ...(hasBody
-      ? { body: Readable.toWeb(req) as ReadableStream, duplex: "half" }
-      : {}),
+  const init: RequestInit = { headers, method: req.method ?? "GET", signal };
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    init.body = await arrayBuffer(req);
+  }
+  return new Request(url, init);
+};
+
+/** Copies a web response body to the Node response chunk by chunk, so SSE streams stay live. */
+const writeBody = async (
+  body: ReadableStream<Uint8Array>,
+  res: ServerResponse
+): Promise<void> => {
+  try {
+    for await (const chunk of body) {
+      res.write(chunk);
+    }
+    res.end();
+  } catch {
+    // The client went away or the handler aborted the stream.
+    res.destroy();
+  }
+};
+
+/**
+ * Serve MCP over Streamable HTTP on 127.0.0.1. The Host check blocks DNS rebinding, and requests
+ * that carry an Origin header are refused because only local clients, not web pages, may connect.
+ */
+export const serveHttp = (port: number): HttpServerHandle => {
+  const handler = createMcpHandler(() => createServer());
+  const allowedHosts = localhostAllowedHostnames();
+
+  const respond = async (
+    req: IncomingMessage,
+    signal: AbortSignal
+  ): Promise<Response> => {
+    const url = `http://${req.headers.host ?? HOST}${req.url ?? "/"}`;
+    if (new URL(url).pathname !== ENDPOINT) {
+      return new Response("Not found", { status: 404 });
+    }
+    if (req.headers.origin !== undefined) {
+      return new Response("Browser requests are not allowed", { status: 403 });
+    }
+    const request = await toRequest(req, url, signal);
+    return (
+      hostHeaderValidationResponse(request, allowedHosts) ??
+      (await handler.fetch(request))
+    );
+  };
+
+  const serve = async (
+    req: IncomingMessage,
+    res: ServerResponse
+  ): Promise<void> => {
+    const abort = new AbortController();
+    res.on("close", () => {
+      abort.abort();
+    });
+    const response = await respond(req, abort.signal);
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body === null) {
+      res.end();
+    } else {
+      await writeBody(response.body, res);
+    }
+  };
+
+  const server = createHttpServer((req, res) => {
+    void serve(req, res);
   });
-}
+  server.listen(port, HOST);
+
+  return {
+    close: async () => {
+      if (server.listening) {
+        server.close();
+        await once(server, "close");
+      }
+      await handler.close();
+    },
+  };
+};

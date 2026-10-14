@@ -65,11 +65,11 @@ export type TrackWrites = Partial<Record<TrackFlag, boolean>> & {
 };
 
 /** Turn a request into Music property writes, clearing the opposite flag of one set to true. */
-export function planTrackWrites({
+export const planTrackWrites = ({
   favorited,
   disliked,
   rating,
-}: TrackUpdate): TrackWrites {
+}: TrackUpdate): TrackWrites => {
   const writes: TrackWrites = {};
   if (favorited !== undefined) {
     writes.favorited = favorited;
@@ -85,7 +85,7 @@ export function planTrackWrites({
     writes.rating = rating * 20;
   }
   return writes;
-}
+};
 
 const updateTrackScriptResultSchema = z.discriminatedUnion("found", [
   z.object({ found: z.literal(false) }),
@@ -97,14 +97,17 @@ const updateTrackScriptResultSchema = z.discriminatedUnion("found", [
   }),
 ]);
 
-export function buildUpdateTrackScript(
+export const buildUpdateTrackScript = (
   trackId: string,
   writes: TrackWrites
-): string {
+): string => {
   // False flags go first so that, if Music clears one flag when another is set, the true one wins.
-  const flagWrites = (["favorited", "disliked"] as const)
-    .filter((flag) => writes[flag] !== undefined)
-    .sort((left, right) => Number(writes[left]) - Number(writes[right]))
+  const flagWrites = [false, true]
+    .flatMap((value) =>
+      (["favorited", "disliked"] as const).filter(
+        (flag) => writes[flag] === value
+      )
+    )
     .map((flag) => `set ${flag} of t to ${writes[flag]}`);
   const ratingWrite =
     writes.rating === undefined ? [] : [`set rating of t to ${writes.rating}`];
@@ -122,36 +125,34 @@ try
 on error errMsg number errNum
     error errMsg number errNum
 end try`);
-}
+};
 
-export function createLibraryOperations(execFn?: ExecFn) {
-  return {
-    async updateTrack(trackId: string, writes: TrackWrites) {
-      const result = await runAppleScript(
-        buildUpdateTrackScript(trackId, writes),
-        40_000,
-        execFn
+export const createLibraryOperations = (execFn?: ExecFn) => ({
+  async updateTrack(trackId: string, writes: TrackWrites) {
+    const result = await runAppleScript(
+      buildUpdateTrackScript(trackId, writes),
+      40_000,
+      execFn
+    );
+    const parsed = parseAppleScriptJson(
+      result.stdout,
+      updateTrackScriptResultSchema,
+      "Music returned an invalid track update payload."
+    );
+    if (!parsed.found) {
+      throw new MusicToolError(
+        "not_found",
+        `No library track has the ID ${trackId}.`
       );
-      const parsed = parseAppleScriptJson(
-        result.stdout,
-        updateTrackScriptResultSchema,
-        "Music returned an invalid track update payload."
-      );
-      if (!parsed.found) {
-        throw new MusicToolError(
-          "not_found",
-          `No library track has the ID ${trackId}.`
-        );
-      }
-      return {
-        disliked: parsed.disliked,
-        favorited: parsed.favorited,
-        rating: Math.round(parsed.rating / 20),
-        trackId,
-      };
-    },
-  };
-}
+    }
+    return {
+      disliked: parsed.disliked,
+      favorited: parsed.favorited,
+      rating: Math.round(parsed.rating / 20),
+      trackId,
+    };
+  },
+});
 
 const libraryOperations = createLibraryOperations();
 
@@ -162,10 +163,10 @@ export const updateTrackTool = defineTool({
   dryRunResult(input) {
     const writes = planTrackWrites(input);
     return {
-      trackId: input.trackId,
-      favorited: writes.favorited ?? false,
       disliked: writes.disliked ?? false,
+      favorited: writes.favorited ?? false,
       rating: input.rating ?? 0,
+      trackId: input.trackId,
     };
   },
   async handler(input) {
@@ -173,7 +174,7 @@ export const updateTrackTool = defineTool({
       input.trackId,
       planTrackWrites(input)
     );
-    return { structuredContent: result, logData: { trackId: input.trackId } };
+    return { logData: { trackId: input.trackId }, structuredContent: result };
   },
   inputSchema: updateTrackInputSchema,
   name: "music.update_track",

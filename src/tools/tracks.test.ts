@@ -21,22 +21,39 @@ const sampleTrack: LibraryTrack = {
   year: 2024,
 };
 
-function trackColumns(tracks: LibraryTrack[]): Record<string, unknown[]> {
-  return {
-    album: tracks.map((track) => track.album),
-    artist: tracks.map((track) => track.artist),
-    duration: tracks.map((track) => track.duration),
-    genre: tracks.map((track) => track.genre),
-    name: tracks.map((track) => track.name),
-    persistentID: tracks.map((track) => track.id),
-    playCount: tracks.map((track) => track.playCount),
-    year: tracks.map((track) => track.year),
-  };
-}
+const trackColumns = (tracks: LibraryTrack[]) => ({
+  album: tracks.map((track) => track.album),
+  artist: tracks.map((track) => track.artist),
+  duration: tracks.map((track) => track.duration),
+  genre: tracks.map((track) => track.genre),
+  name: tracks.map((track) => track.name),
+  persistentID: tracks.map((track) => track.id),
+  playCount: tracks.map((track) => track.playCount),
+  year: tracks.map((track) => track.year),
+});
+
+const execReturning =
+  (stdout: string): ExecFn =>
+  async () =>
+    await Promise.resolve({ stderr: "", stdout });
+
+const rejectionOf = async (promise: Promise<unknown>): Promise<Error> => {
+  try {
+    await promise;
+  } catch (error) {
+    if (Error.isError(error)) {
+      return error;
+    }
+    throw error;
+  }
+  throw new Error("Expected the promise to reject with an Error.");
+};
+
+type WhoseClause = Record<string, Record<string, string | number>>;
 
 interface ScriptCall {
   language: ScriptLanguage;
-  whoseArgument: unknown;
+  whoseArgument: WhoseClause | string;
 }
 
 /**
@@ -44,44 +61,48 @@ interface ScriptCall {
  * whose clause with the given columns, and throws on property reads of an empty result as Music
  * does.
  */
-function fakeMusicExec(columns: Record<string, unknown[]>): {
-  exec: ExecFn;
-  calls: ScriptCall[];
-} {
+const fakeMusicExec = (columns: Record<string, unknown[]>) => {
   const calls: ScriptCall[] = [];
   const count = columns.persistentID?.length ?? 0;
-  const collection: Record<string, unknown> = { length: count };
-  for (const [name, values] of Object.entries(columns)) {
-    collection[name === "playCount" ? "playedCount" : name] = () => {
-      if (count === 0) {
-        throw new Error("Can't get object.");
-      }
-      return values;
-    };
-  }
+  const collection = {
+    ...Object.fromEntries(
+      Object.entries(columns).map(([name, values]) => [
+        name === "playCount" ? "playedCount" : name,
+        () => {
+          if (count === 0) {
+            throw new Error("Can't get object.");
+          }
+          return values;
+        },
+      ])
+    ),
+    length: count,
+  };
   const exec: ExecFn = async (script, _timeoutMs, language) => {
     const call: ScriptCall = { language, whoseArgument: "whose not called" };
     calls.push(call);
     const tracks = {
       ...collection,
-      whose: (argument: unknown) => {
+      whose: (argument: WhoseClause) => {
         call.whoseArgument = argument;
         return collection;
       },
     };
     const Application = () => ({
-      launch: () => undefined,
+      launch: () => {},
       libraryPlaylists: [{ tracks }],
       running: () => true,
     });
-    const stdout = vm.runInNewContext(script, {
-      Application,
-      delay: () => {},
-    });
-    return { stderr: "", stdout };
+    const stdout = String(
+      vm.runInNewContext(script, {
+        Application,
+        delay: () => {},
+      })
+    );
+    return await Promise.resolve({ stderr: "", stdout });
   };
   return { calls, exec };
-}
+};
 
 interface FakeMusicOptions {
   library: LibraryTrack[];
@@ -100,16 +121,13 @@ const MUSIC_NOT_FOUND = "Can't get object. (-1728)";
  * -1728 on property reads of an empty whose result. Returns the playlist's live entries so tests
  * can assert on the end state.
  */
-function fakeMusic(options: FakeMusicOptions): {
-  exec: ExecFn;
-  playlistTracks: LibraryTrack[];
-} {
+const fakeMusic = (options: FakeMusicOptions) => {
   const playlistTracks = [...(options.playlist?.tracks ?? [])];
   // Each playlist entry carries its own database ID in Music, distinct from the library track's.
   const entryIds = playlistTracks.map((_, index) => 1000 + index);
   let nextEntryId = 1000 + playlistTracks.length;
-  const failDuplicate = new Set(options.failDuplicate ?? []);
-  const failDeleteAt = new Set(options.failDeleteAt ?? []);
+  const failDuplicate = new Set(options.failDuplicate);
+  const failDeleteAt = new Set(options.failDeleteAt);
   const libraryDatabaseId = (track: LibraryTrack) =>
     options.library.indexOf(track) + 1;
 
@@ -118,39 +136,61 @@ function fakeMusic(options: FakeMusicOptions): {
     kind: Kind;
     index: number;
   }
-  const columns: Record<
-    string,
-    (track: LibraryTrack, index: number, kind: Kind) => unknown
-  > = {
-    album: (track) => track.album,
-    artist: (track) => track.artist,
-    duration: (track) => track.duration,
-    genre: (track) => track.genre,
-    id: (track, index, kind) =>
+  interface FakeCollection {
+    byId: (databaseId: number) => Spec;
+    slice: (start: number, end: number) => FakeCollection;
+  }
+  const columns = {
+    album: (track: LibraryTrack) => track.album,
+    artist: (track: LibraryTrack) => track.artist,
+    duration: (track: LibraryTrack) => track.duration,
+    genre: (track: LibraryTrack) => track.genre,
+    id: (track: LibraryTrack, index: number, kind: Kind) =>
       kind === "library" ? libraryDatabaseId(track) : entryIds[index],
-    name: (track) => track.name,
-    persistentID: (track) => track.id,
-    playedCount: (track) => track.playCount,
-    year: (track) => track.year,
+    name: (track: LibraryTrack) => track.name,
+    persistentID: (track: LibraryTrack) => track.id,
+    playedCount: (track: LibraryTrack) => track.playCount,
+    year: (track: LibraryTrack) => track.year,
   };
 
   /** One element specifier: a handle for duplicate/delete that also reads its own properties. */
-  function element(kind: Kind, tracks: () => LibraryTrack[], index: number) {
-    const spec: Record<string, unknown> & Spec = { index, kind };
-    for (const [name, read] of Object.entries(columns)) {
-      spec[name] = () => {
-        const track = tracks()[index];
-        if (!track) {
-          throw new Error(MUSIC_NOT_FOUND);
-        }
-        return read(track, index, kind);
-      };
-    }
-    return spec;
-  }
+  const element = (
+    kind: Kind,
+    tracks: () => LibraryTrack[],
+    index: number
+  ): Spec => ({
+    ...Object.fromEntries(
+      Object.entries(columns).map(([name, read]) => [
+        name,
+        () => {
+          const track = tracks()[index];
+          if (!track) {
+            throw new Error(MUSIC_NOT_FOUND);
+          }
+          return read(track, index, kind);
+        },
+      ])
+    ),
+    index,
+    kind,
+  });
 
-  function collection(kind: Kind, tracks: () => LibraryTrack[]) {
-    const target: Record<string | symbol, unknown> = {
+  const collection = (
+    kind: Kind,
+    tracks: () => LibraryTrack[]
+  ): FakeCollection => {
+    const readers = new Map(
+      Object.entries(columns).map(([name, read]) => [
+        name,
+        () => {
+          if (tracks().length === 0) {
+            throw new Error(MUSIC_NOT_FOUND);
+          }
+          return tracks().map((track, index) => read(track, index, kind));
+        },
+      ])
+    );
+    const target = {
       byId: (databaseId: number) => {
         const index =
           kind === "library"
@@ -171,26 +211,22 @@ function fakeMusic(options: FakeMusicOptions): {
         return collection(kind, () => (range.length === 1 ? [] : range));
       },
     };
-    for (const [name, read] of Object.entries(columns)) {
-      target[name] = () => {
-        if (tracks().length === 0) {
-          throw new Error(MUSIC_NOT_FOUND);
-        }
-        return tracks().map((track, index) => read(track, index, kind));
-      };
-    }
     return new Proxy(target, {
       get(object, property) {
         if (property === "length") {
           return tracks().length;
         }
-        if (typeof property === "string" && /^\d+$/.test(property)) {
-          return element(kind, tracks, Number(property));
+        const name = String(property);
+        if (/^\d+$/u.test(name)) {
+          return element(kind, tracks, Number(name));
         }
-        return object[property];
+        if (name === "byId" || name === "slice") {
+          return object[name];
+        }
+        return readers.get(name);
       },
     });
-  }
+  };
 
   const libraryTracks = collection("library", () => options.library);
   const playlistCollection = collection("playlist", () => playlistTracks);
@@ -200,8 +236,9 @@ function fakeMusic(options: FakeMusicOptions): {
       if (spec.kind !== "playlist" || spec.index >= playlistTracks.length) {
         throw new Error(MUSIC_NOT_FOUND);
       }
-      if (failDeleteAt.has(spec.index))
+      if (failDeleteAt.has(spec.index)) {
         throw new Error("Music got an error: Can't delete.");
+      }
       playlistTracks.splice(spec.index, 1);
       entryIds.splice(spec.index, 1);
     },
@@ -221,12 +258,14 @@ function fakeMusic(options: FakeMusicOptions): {
       entryIds.push(nextEntryId);
       nextEntryId += 1;
     },
-    launch: () => undefined,
+    launch: () => {},
     libraryPlaylists: [{ tracks: libraryTracks }],
     running: () => true,
     userPlaylists: {
       byId: (databaseId: number) => {
-        if (databaseId !== 7) throw new Error(MUSIC_NOT_FOUND);
+        if (databaseId !== 7) {
+          throw new Error(MUSIC_NOT_FOUND);
+        }
         return playlistObject;
       },
       whose: (argument: { persistentID: string }) =>
@@ -247,28 +286,39 @@ function fakeMusic(options: FakeMusicOptions): {
   const exec: ExecFn = async (script, _timeoutMs, language) => {
     expect(language).toBe("JavaScript");
     try {
-      const stdout = vm.runInNewContext(script, {
-        Application: () => music,
-        delay: () => {},
-      });
-      return { stderr: "", stdout: String(stdout) };
+      const stdout = String(
+        vm.runInNewContext(script, {
+          Application: () => music,
+          delay: () => {},
+        })
+      );
+      return await Promise.resolve({ stderr: "", stdout });
     } catch (error) {
       // osascript reports script errors on stderr with the Apple error number in parentheses.
       throw Object.assign(new Error("osascript failed"), {
-        stderr: `execution error: Error: ${(error as Error).message}`,
+        stderr: `execution error: Error: ${Error.isError(error) ? error.message : String(error)}`,
       });
     }
   };
   return { exec, playlistTracks };
-}
+};
 
-function libraryOf(count: number): LibraryTrack[] {
-  return Array.from({ length: count }, (_, index) => ({
-    ...sampleTrack,
-    id: `TRACK${index.toString().padStart(11, "0")}`,
-    name: `Track ${index}`,
-  }));
-}
+const libraryTrack = (index: number): LibraryTrack => ({
+  ...sampleTrack,
+  id: `TRACK${index.toString().padStart(11, "0")}`,
+  name: `Track ${index}`,
+});
+
+const libraryOf = (count: number): LibraryTrack[] =>
+  Array.from({ length: count }, (_, index) => libraryTrack(index));
+
+const toPlaylistTrack = (track: LibraryTrack) => ({
+  album: track.album,
+  artist: track.artist,
+  duration: track.duration,
+  id: track.id,
+  name: track.name,
+});
 
 describe("pickFindTracksPrefilter", () => {
   test("prefers the longest text criterion", () => {
@@ -346,38 +396,41 @@ describe("createTrackOperations.findTracks", () => {
     const { exec, calls } = fakeMusicExec(trackColumns([]));
     const operations = createTrackOperations(exec);
 
-    await expect(operations.findTracks({})).rejects.toThrow(
+    const missingFilter = await rejectionOf(operations.findTracks({}));
+    expect(missingFilter.message).toContain(
       "At least one track filter is required."
     );
-    await expect(
+    const reversedYears = await rejectionOf(
       operations.findTracks({ yearMax: 2020, yearMin: 2025 })
-    ).rejects.toThrow("yearMin must be less than or equal to yearMax.");
-    await expect(
+    );
+    expect(reversedYears.message).toContain(
+      "yearMin must be less than or equal to yearMax."
+    );
+    const reversedPlayCounts = await rejectionOf(
       operations.findTracks({ playCountMax: 2, playCountMin: 10 })
-    ).rejects.toThrow(
+    );
+    expect(reversedPlayCounts.message).toContain(
       "playCountMin must be less than or equal to playCountMax."
     );
     expect(calls).toHaveLength(0);
   });
 
   test("asks Music for the text filter and reads matching rows column by column", async () => {
-    const tracks = [
-      {
-        ...sampleTrack,
-        id: "TRACK00000000001",
-        name: "Love Lost",
-        playCount: 1,
-        year: 2001,
-      },
-      {
-        ...sampleTrack,
-        id: "TRACK00000000002",
-        name: "Glove",
-        playCount: 9,
-        year: 2002,
-      },
-    ];
-    const { exec, calls } = fakeMusicExec(trackColumns(tracks));
+    const loveLost = {
+      ...sampleTrack,
+      id: "TRACK00000000001",
+      name: "Love Lost",
+      playCount: 1,
+      year: 2001,
+    };
+    const glove = {
+      ...sampleTrack,
+      id: "TRACK00000000002",
+      name: "Glove",
+      playCount: 9,
+      year: 2002,
+    };
+    const { exec, calls } = fakeMusicExec(trackColumns([loveLost, glove]));
     const operations = createTrackOperations(exec);
 
     const result = await operations.findTracks({
@@ -394,7 +447,7 @@ describe("createTrackOperations.findTracks", () => {
       limit: 50,
       scanned: 2,
       totalMatched: 2,
-      tracks: [tracks[1]!, tracks[0]!],
+      tracks: [glove, loveLost],
       truncated: false,
     });
   });
@@ -407,7 +460,7 @@ describe("createTrackOperations.findTracks", () => {
       yearMax: 2010,
       yearMin: 2000,
     });
-    expect(calls[0]!.whoseArgument).toEqual({
+    expect(calls[0]?.whoseArgument).toEqual({
       year: { _lessThanEquals: 2010 },
     });
     expect(result).toEqual({
@@ -422,10 +475,10 @@ describe("createTrackOperations.findTracks", () => {
   test("delivers hostile filter text to Music unchanged", async () => {
     const { exec, calls } = fakeMusicExec(trackColumns([]));
     const operations = createTrackOperations(exec);
-    const hostile = `a"b\\c\nd${String.fromCharCode(0x20_28)}e\`); throw new Error("pwned"); (\``;
+    const hostile = `a"b\\c\nd${String.fromCodePoint(0x20_28)}e\`); throw new Error("pwned"); (\``;
 
     await operations.findTracks({ artist: hostile });
-    expect(calls[0]!.whoseArgument).toEqual({ artist: { _contains: hostile } });
+    expect(calls[0]?.whoseArgument).toEqual({ artist: { _contains: hostile } });
   });
 
   test("applies the filters Music did not evaluate, then sorts and limits", async () => {
@@ -497,7 +550,7 @@ describe("createTrackOperations.findTracks", () => {
     expect(result.scanned).toBe(FIND_TRACKS_CANDIDATE_CAP);
     expect(result.truncated).toBe(true);
     expect(result.totalMatched).toBe(FIND_TRACKS_CANDIDATE_CAP);
-    expect(result.tracks[0]!.playCount).toBe(FIND_TRACKS_CANDIDATE_CAP - 1);
+    expect(result.tracks[0]?.playCount).toBe(FIND_TRACKS_CANDIDATE_CAP - 1);
   });
 
   test("fails when Music returns columns of different lengths", async () => {
@@ -509,9 +562,9 @@ describe("createTrackOperations.findTracks", () => {
     const { exec } = fakeMusicExec(columns);
     const operations = createTrackOperations(exec);
 
-    await expect(
-      operations.findTracks({ yearMin: 2000 })
-    ).rejects.toMatchObject({
+    expect(
+      await rejectionOf(operations.findTracks({ yearMin: 2000 }))
+    ).toMatchObject({
       code: "script_error",
     });
   });
@@ -527,44 +580,46 @@ describe("createTrackOperations.findTracks", () => {
       playCounts: [3],
       years: [2001],
     };
-    const payloads: unknown[] = [
-      { scanned: 1, tracks: "not-an-array", truncated: false },
-      {
+    const payloads = [
+      JSON.stringify({ scanned: 1, tracks: "not-an-array", truncated: false }),
+      JSON.stringify({
         columns: { ...validColumns, years: ["2001"] },
         scanned: 1,
         truncated: false,
-      },
-      { columns: { ...validColumns, names: [] }, scanned: 1, truncated: false },
-      { columns: validColumns, scanned: 2, truncated: false },
-      { columns: validColumns, scanned: 1, truncated: "no" },
-      "not json",
-    ];
-    for (const payload of payloads) {
-      const operations = createTrackOperations(async () => ({
-        stderr: "",
-        stdout: typeof payload === "string" ? payload : JSON.stringify(payload),
-      }));
-      await expect(
-        operations.findTracks({ yearMin: 2000 })
-      ).rejects.toMatchObject({
-        code: "script_error",
-      });
-    }
-
-    const operations = createTrackOperations(async () => ({
-      stderr: "",
-      stdout: JSON.stringify({
-        columns: validColumns,
+      }),
+      JSON.stringify({
+        columns: { ...validColumns, names: [] },
         scanned: 1,
         truncated: false,
       }),
-    }));
-    await expect(
-      operations.findTracks({ yearMin: 2000 })
-    ).resolves.toMatchObject({
+      JSON.stringify({ columns: validColumns, scanned: 2, truncated: false }),
+      JSON.stringify({ columns: validColumns, scanned: 1, truncated: "no" }),
+      "not json",
+    ];
+    await Promise.all(
+      payloads.map(async (payload) => {
+        const operations = createTrackOperations(execReturning(payload));
+        expect(
+          await rejectionOf(operations.findTracks({ yearMin: 2000 }))
+        ).toMatchObject({
+          code: "script_error",
+        });
+      })
+    );
+
+    const operations = createTrackOperations(
+      execReturning(
+        JSON.stringify({
+          columns: validColumns,
+          scanned: 1,
+          truncated: false,
+        })
+      )
+    );
+    expect(await operations.findTracks({ yearMin: 2000 })).toMatchObject({
       totalMatched: 1,
       tracks: [
-        { id: "TRACK00000000001", name: "Love", year: 2001, playCount: 3 },
+        { id: "TRACK00000000001", name: "Love", playCount: 3, year: 2001 },
       ],
     });
   });
@@ -599,13 +654,6 @@ describe("createTrackOperations.findTracks", () => {
 
 describe("createTrackOperations.getPlaylistTracks", () => {
   const library = libraryOf(5);
-  const page = (track: LibraryTrack) => ({
-    album: track.album,
-    artist: track.artist,
-    duration: track.duration,
-    id: track.id,
-    name: track.name,
-  });
 
   test("returns the requested page with the playlist total", async () => {
     const { exec } = fakeMusic({
@@ -614,13 +662,13 @@ describe("createTrackOperations.getPlaylistTracks", () => {
     });
     const operations = createTrackOperations(exec);
 
-    await expect(
-      operations.getPlaylistTracks("playlist12345678", 1, 2)
-    ).resolves.toEqual({
+    expect(
+      await operations.getPlaylistTracks("playlist12345678", 1, 2)
+    ).toEqual({
       limit: 2,
       offset: 1,
       total: 5,
-      tracks: [page(library[1]!), page(library[2]!)],
+      tracks: library.slice(1, 3).map(toPlaylistTrack),
     });
   });
 
@@ -631,13 +679,13 @@ describe("createTrackOperations.getPlaylistTracks", () => {
     });
     const operations = createTrackOperations(exec);
 
-    await expect(
-      operations.getPlaylistTracks("PLAYLIST12345678", 4, 10)
-    ).resolves.toEqual({
+    expect(
+      await operations.getPlaylistTracks("PLAYLIST12345678", 4, 10)
+    ).toEqual({
       limit: 10,
       offset: 4,
       total: 5,
-      tracks: [page(library[4]!)],
+      tracks: library.slice(4).map(toPlaylistTrack),
     });
   });
 
@@ -648,9 +696,7 @@ describe("createTrackOperations.getPlaylistTracks", () => {
         playlist: { id: "PLAYLIST12345678", tracks: library },
       }).exec
     );
-    await expect(
-      full.getPlaylistTracks("PLAYLIST12345678", 5, 50)
-    ).resolves.toEqual({
+    expect(await full.getPlaylistTracks("PLAYLIST12345678", 5, 50)).toEqual({
       limit: 50,
       offset: 5,
       total: 5,
@@ -661,9 +707,7 @@ describe("createTrackOperations.getPlaylistTracks", () => {
       fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: [] } })
         .exec
     );
-    await expect(
-      empty.getPlaylistTracks("PLAYLIST12345678", 0, 50)
-    ).resolves.toEqual({
+    expect(await empty.getPlaylistTracks("PLAYLIST12345678", 0, 50)).toEqual({
       limit: 50,
       offset: 0,
       total: 0,
@@ -677,47 +721,46 @@ describe("createTrackOperations.getPlaylistTracks", () => {
       playlist: { id: "PLAYLIST12345678", tracks: library },
     });
     const operations = createTrackOperations(exec);
-    const hostile = `A"); throw new Error("pwned"); (\`${String.fromCharCode(0x20_28)}`;
+    const hostile = `A"); throw new Error("pwned"); (\`${String.fromCodePoint(0x20_28)}`;
 
-    await expect(
-      operations.getPlaylistTracks("PLAYLIST00000000", 0, 50)
-    ).rejects.toMatchObject({
+    expect(
+      await rejectionOf(operations.getPlaylistTracks("PLAYLIST00000000", 0, 50))
+    ).toMatchObject({
       code: "not_found",
     });
-    await expect(
-      operations.getPlaylistTracks(hostile, 0, 50)
-    ).rejects.toMatchObject({
+    expect(
+      await rejectionOf(operations.getPlaylistTracks(hostile, 0, 50))
+    ).toMatchObject({
       code: "not_found",
     });
   });
 
   test("rejects schema-invalid script payloads", async () => {
-    const operations = createTrackOperations(async () => ({
-      stderr: "",
-      stdout: JSON.stringify({
-        tracks: [{ id: "X" }],
-        total: 1,
-        offset: 0,
-        limit: 50,
-      }),
-    }));
+    const operations = createTrackOperations(
+      execReturning(
+        JSON.stringify({
+          limit: 50,
+          offset: 0,
+          total: 1,
+          tracks: [{ id: "X" }],
+        })
+      )
+    );
 
-    await expect(
-      operations.getPlaylistTracks("PLAYLIST12345678", 0, 50)
-    ).rejects.toMatchObject({
+    expect(
+      await rejectionOf(operations.getPlaylistTracks("PLAYLIST12345678", 0, 50))
+    ).toMatchObject({
       code: "script_error",
     });
   });
 });
 
 describe("createTrackOperations.addTracksToPlaylist", () => {
-  const library = libraryOf(5);
-  const [track0, track1, track2, track3] = library as [
-    LibraryTrack,
-    LibraryTrack,
-    LibraryTrack,
-    LibraryTrack,
-  ];
+  const track0 = libraryTrack(0);
+  const track1 = libraryTrack(1);
+  const track2 = libraryTrack(2);
+  const track3 = libraryTrack(3);
+  const library = [track0, track1, track2, track3, libraryTrack(4)];
 
   test("adds library tracks in request order and classifies missing and failed IDs", async () => {
     const { exec, playlistTracks } = fakeMusic({
@@ -727,14 +770,14 @@ describe("createTrackOperations.addTracksToPlaylist", () => {
     });
     const operations = createTrackOperations(exec);
 
-    await expect(
-      operations.addTracksToPlaylist("PLAYLIST12345678", [
+    expect(
+      await operations.addTracksToPlaylist("PLAYLIST12345678", [
         track2.id,
         "FFFFFFFFFFFFFFF0",
         track3.id,
         track1.id,
       ])
-    ).resolves.toEqual({
+    ).toEqual({
       added: 2,
       addedTrackIds: [track2.id, track1.id],
       failedTrackIds: [track3.id],
@@ -777,13 +820,15 @@ describe("createTrackOperations.addTracksToPlaylist", () => {
     const { exec } = fakeMusic({ library });
     const operations = createTrackOperations(exec);
 
-    await expect(
-      operations.addTracksToPlaylist("PLAYLIST12345678", [track0.id])
-    ).rejects.toMatchObject({ code: "not_found" });
+    expect(
+      await rejectionOf(
+        operations.addTracksToPlaylist("PLAYLIST12345678", [track0.id])
+      )
+    ).toMatchObject({ code: "not_found" });
   });
 
   test("passes hostile IDs to Music as data, not code", async () => {
-    const hostile = `A"); throw new Error("pwned"); (\`${String.fromCharCode(0x20_28)}`;
+    const hostile = `A"); throw new Error("pwned"); (\`${String.fromCodePoint(0x20_28)}`;
     const { exec, playlistTracks } = fakeMusic({
       library,
       playlist: { id: "PLAYLIST12345678", tracks: [] },
@@ -796,21 +841,19 @@ describe("createTrackOperations.addTracksToPlaylist", () => {
     ]);
     expect(result.missingTrackIds).toEqual([hostile]);
     expect(playlistTracks).toEqual([track0]);
-    await expect(
-      operations.addTracksToPlaylist(hostile, [track0.id])
-    ).rejects.toMatchObject({
+    expect(
+      await rejectionOf(operations.addTracksToPlaylist(hostile, [track0.id]))
+    ).toMatchObject({
       code: "not_found",
     });
   });
 });
 
 describe("createTrackOperations.removeTracksFromPlaylist", () => {
-  const library = libraryOf(4);
-  const [trackA, trackB, trackC] = library as [
-    LibraryTrack,
-    LibraryTrack,
-    LibraryTrack,
-  ];
+  const trackA = libraryTrack(0);
+  const trackB = libraryTrack(1);
+  const trackC = libraryTrack(2);
+  const library = [trackA, trackB, trackC, libraryTrack(3)];
 
   test("removes every instance of each requested track and reports missing IDs", async () => {
     const { exec, playlistTracks } = fakeMusic({
@@ -833,8 +876,9 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
       removed: 3,
       requested: 3,
     });
-    expect([...result.removedTrackIds].sort()).toEqual(
-      [trackA.id, trackC.id].sort()
+    expect(result.removedTrackIds).toHaveLength(2);
+    expect(new Set(result.removedTrackIds)).toEqual(
+      new Set([trackA.id, trackC.id])
     );
     expect(playlistTracks).toEqual([trackB]);
   });
@@ -847,9 +891,9 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
     });
     const operations = createTrackOperations(exec);
 
-    await expect(
-      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id])
-    ).resolves.toEqual({
+    expect(
+      await operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id])
+    ).toEqual({
       failedTrackIds: [trackA.id],
       missingTrackIds: [],
       playlistId: "PLAYLIST12345678",
@@ -882,12 +926,12 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
     });
     const operations = createTrackOperations(exec);
 
-    await expect(
-      operations.removeTracksFromPlaylist("PLAYLIST12345678", [
+    expect(
+      await operations.removeTracksFromPlaylist("PLAYLIST12345678", [
         trackA.id,
         trackB.id,
       ])
-    ).resolves.toMatchObject({
+    ).toMatchObject({
       failedTrackIds: [],
       missingTrackIds: [trackA.id, trackB.id],
       removed: 0,
@@ -899,13 +943,15 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
     const { exec } = fakeMusic({ library });
     const operations = createTrackOperations(exec);
 
-    await expect(
-      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id])
-    ).rejects.toMatchObject({ code: "not_found" });
+    expect(
+      await rejectionOf(
+        operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id])
+      )
+    ).toMatchObject({ code: "not_found" });
   });
 
   test("passes hostile IDs to Music as data, not code", async () => {
-    const hostile = `A"); throw new Error("pwned"); (\`${String.fromCharCode(0x20_29)}`;
+    const hostile = `A"); throw new Error("pwned"); (\`${String.fromCodePoint(0x20_29)}`;
     const { exec, playlistTracks } = fakeMusic({
       library,
       playlist: { id: "PLAYLIST12345678", tracks: [trackA] },
@@ -918,9 +964,11 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
     );
     expect(result.missingTrackIds).toEqual([hostile]);
     expect(playlistTracks).toEqual([trackA]);
-    await expect(
-      operations.removeTracksFromPlaylist(hostile, [trackA.id])
-    ).rejects.toMatchObject({
+    expect(
+      await rejectionOf(
+        operations.removeTracksFromPlaylist(hostile, [trackA.id])
+      )
+    ).toMatchObject({
       code: "not_found",
     });
   });
@@ -928,25 +976,26 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
 
 describe("createTrackOperations mutations", () => {
   test("returns add success, missing, and duplicate-failure classifications", async () => {
-    const operations = createTrackOperations(async () => ({
-      stderr: "",
-      stdout: JSON.stringify({
-        playlistId: "PLAYLIST12345678",
-        requested: 3,
-        added: 1,
-        addedTrackIds: ["TRACK00000000001"],
-        missingTrackIds: ["TRACK00000000002"],
-        failedTrackIds: ["TRACK00000000003"],
-      }),
-    }));
+    const operations = createTrackOperations(
+      execReturning(
+        JSON.stringify({
+          added: 1,
+          addedTrackIds: ["TRACK00000000001"],
+          failedTrackIds: ["TRACK00000000003"],
+          missingTrackIds: ["TRACK00000000002"],
+          playlistId: "PLAYLIST12345678",
+          requested: 3,
+        })
+      )
+    );
 
-    await expect(
-      operations.addTracksToPlaylist("playlist12345678", [
+    expect(
+      await operations.addTracksToPlaylist("playlist12345678", [
         "TRACK00000000001",
         "TRACK00000000002",
         "TRACK00000000003",
       ])
-    ).resolves.toEqual({
+    ).toEqual({
       added: 1,
       addedTrackIds: ["TRACK00000000001"],
       failedTrackIds: ["TRACK00000000003"],
@@ -957,47 +1006,51 @@ describe("createTrackOperations mutations", () => {
   });
 
   test("rejects inconsistent add counts", async () => {
-    const operations = createTrackOperations(async () => ({
-      stderr: "",
-      stdout: JSON.stringify({
-        playlistId: "PLAYLIST12345678",
-        requested: 2,
-        added: 1,
-        addedTrackIds: ["TRACK00000000001"],
-        missingTrackIds: [],
-        failedTrackIds: [],
-      }),
-    }));
+    const operations = createTrackOperations(
+      execReturning(
+        JSON.stringify({
+          added: 1,
+          addedTrackIds: ["TRACK00000000001"],
+          failedTrackIds: [],
+          missingTrackIds: [],
+          playlistId: "PLAYLIST12345678",
+          requested: 2,
+        })
+      )
+    );
 
-    await expect(
-      operations.addTracksToPlaylist("PLAYLIST12345678", [
-        "TRACK00000000001",
-        "TRACK00000000002",
-      ])
-    ).rejects.toMatchObject({ code: "script_error" });
+    expect(
+      await rejectionOf(
+        operations.addTracksToPlaylist("PLAYLIST12345678", [
+          "TRACK00000000001",
+          "TRACK00000000002",
+        ])
+      )
+    ).toMatchObject({ code: "script_error" });
   });
 
   test("returns removal instances, missing IDs, and failed deletes", async () => {
-    const operations = createTrackOperations(async () => ({
-      stderr: "",
-      stdout: JSON.stringify({
-        playlistId: "PLAYLIST12345678",
-        requested: 4,
-        removed: 3,
-        removedTrackIds: ["TRACK00000000001", "TRACK00000000002"],
-        missingTrackIds: ["TRACK00000000004"],
-        failedTrackIds: ["TRACK00000000002", "TRACK00000000003"],
-      }),
-    }));
+    const operations = createTrackOperations(
+      execReturning(
+        JSON.stringify({
+          failedTrackIds: ["TRACK00000000002", "TRACK00000000003"],
+          missingTrackIds: ["TRACK00000000004"],
+          playlistId: "PLAYLIST12345678",
+          removed: 3,
+          removedTrackIds: ["TRACK00000000001", "TRACK00000000002"],
+          requested: 4,
+        })
+      )
+    );
 
-    await expect(
-      operations.removeTracksFromPlaylist("PLAYLIST12345678", [
+    expect(
+      await operations.removeTracksFromPlaylist("PLAYLIST12345678", [
         "TRACK00000000001",
         "TRACK00000000002",
         "TRACK00000000003",
         "TRACK00000000004",
       ])
-    ).resolves.toEqual({
+    ).toEqual({
       failedTrackIds: ["TRACK00000000002", "TRACK00000000003"],
       missingTrackIds: ["TRACK00000000004"],
       playlistId: "PLAYLIST12345678",
@@ -1008,61 +1061,69 @@ describe("createTrackOperations mutations", () => {
   });
 
   test("rejects classifications that do not match the request", async () => {
-    const addOperations = createTrackOperations(async () => ({
-      stderr: "",
-      stdout: JSON.stringify({
-        playlistId: "PLAYLIST12345678",
-        requested: 2,
-        added: 1,
-        addedTrackIds: ["TRACK00000000001"],
-        missingTrackIds: ["TRACK00000000009"],
-        failedTrackIds: [],
-      }),
-    }));
-    await expect(
-      addOperations.addTracksToPlaylist("playlist12345678", [
-        "TRACK00000000001",
-        "TRACK00000000002",
-      ])
-    ).rejects.toMatchObject({ code: "script_error" });
+    const addOperations = createTrackOperations(
+      execReturning(
+        JSON.stringify({
+          added: 1,
+          addedTrackIds: ["TRACK00000000001"],
+          failedTrackIds: [],
+          missingTrackIds: ["TRACK00000000009"],
+          playlistId: "PLAYLIST12345678",
+          requested: 2,
+        })
+      )
+    );
+    expect(
+      await rejectionOf(
+        addOperations.addTracksToPlaylist("playlist12345678", [
+          "TRACK00000000001",
+          "TRACK00000000002",
+        ])
+      )
+    ).toMatchObject({ code: "script_error" });
 
-    const removeOperations = createTrackOperations(async () => ({
-      stderr: "",
-      stdout: JSON.stringify({
-        playlistId: "PLAYLIST12345678",
-        requested: 2,
-        removed: 1,
-        removedTrackIds: ["TRACK00000000001", "TRACK00000000002"],
-        missingTrackIds: [],
-        failedTrackIds: [],
-      }),
-    }));
-    await expect(
-      removeOperations.removeTracksFromPlaylist("playlist12345678", [
-        "TRACK00000000001",
-        "TRACK00000000002",
-      ])
-    ).rejects.toMatchObject({ code: "script_error" });
+    const removeOperations = createTrackOperations(
+      execReturning(
+        JSON.stringify({
+          failedTrackIds: [],
+          missingTrackIds: [],
+          playlistId: "PLAYLIST12345678",
+          removed: 1,
+          removedTrackIds: ["TRACK00000000001", "TRACK00000000002"],
+          requested: 2,
+        })
+      )
+    );
+    expect(
+      await rejectionOf(
+        removeOperations.removeTracksFromPlaylist("playlist12345678", [
+          "TRACK00000000001",
+          "TRACK00000000002",
+        ])
+      )
+    ).toMatchObject({ code: "script_error" });
   });
   test("rejects duplicate IDs before invoking AppleScript", async () => {
     let invocations = 0;
     const operations = createTrackOperations(async () => {
       invocations += 1;
-      return { stderr: "", stdout: "{}" };
+      return await Promise.resolve({ stderr: "", stdout: "{}" });
     });
 
-    await expect(
+    const duplicateAdd = await rejectionOf(
       operations.addTracksToPlaylist("PLAYLIST12345678", [
         "TRACK00000000001",
         "TRACK00000000001",
       ])
-    ).rejects.toThrow("Track IDs must be unique.");
-    await expect(
+    );
+    expect(duplicateAdd.message).toContain("Track IDs must be unique.");
+    const duplicateRemove = await rejectionOf(
       operations.removeTracksFromPlaylist("PLAYLIST12345678", [
         "TRACK00000000001",
         "TRACK00000000001",
       ])
-    ).rejects.toThrow("Track IDs must be unique.");
+    );
+    expect(duplicateRemove.message).toContain("Track IDs must be unique.");
     expect(invocations).toBe(0);
   });
 });

@@ -1,10 +1,12 @@
 import type {
   InputRequiredResult,
+  ServerContext,
   StandardSchemaWithJSON,
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
 
 import type { RuntimeConfig } from "./config.js";
+import type { DiagnosticData } from "./types.js";
 
 export const READ_ONLY_ANNOTATIONS = Object.freeze({
   destructiveHint: false,
@@ -41,13 +43,13 @@ export type ToolSchemaOutput<S extends ToolSchema> =
 
 export interface ToolResult<Output extends ToolSchema> {
   structuredContent: ToolSchemaOutput<Output>;
-  logData?: Record<string, unknown>;
+  logData?: DiagnosticData;
 }
 
 export interface ToolContext {
   canElicit: boolean;
   /** Client responses to the input requests that an earlier round of this call returned. */
-  inputResponses: Record<string, unknown> | undefined;
+  inputResponses: ServerContext["mcpReq"]["inputResponses"];
   /** The configuration the server was created with. */
   config: RuntimeConfig;
   /** Names of the tools the server registered, in registration order. */
@@ -100,15 +102,25 @@ export type ToolDef<
   Args = ToolSchemaOutput<Input>,
 > = ReadToolDef<Input, Output, Args> | WriteToolDef<Input, Output, Args>;
 
+/** Code that needs a tool's schema types, such as its registration with the SDK. */
+export type ToolUser<R> = <Input extends ToolSchema, Output extends ToolSchema>(
+  tool: ToolDef<Input, Output>
+) => R;
+
+export interface TypedTool {
+  /** Passes the tool to `use` with its schema types intact. */
+  withTypes: <R>(use: ToolUser<R>) => R;
+}
+
 /**
  * A tool with its schema types erased, so tools with different schemas share one array.
- * Its handlers accept `never`: only the registration callback may call them, because the SDK
- * has already parsed the arguments with the same tool's `inputSchema`.
+ * Its handlers accept `never`; call them through `withTypes`, which restores the schema types.
  */
-export type AnyToolDef = ToolDef<ToolSchema, ToolSchema, never>;
+export type AnyToolDef = ToolDef<ToolSchema, ToolSchema, never> & TypedTool;
 
-export function defineTool<Input extends ToolSchema, Output extends ToolSchema>(
+export const defineTool = <Input extends ToolSchema, Output extends ToolSchema>(
   definition: ToolDef<Input, Output>
-): ToolDef<Input, Output> {
-  return definition;
-}
+): ToolDef<Input, Output> & TypedTool => ({
+  ...definition,
+  withTypes: (use) => use(definition),
+});
