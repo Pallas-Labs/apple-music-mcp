@@ -13,8 +13,8 @@ import type { AnyToolDef, ToolContext, ToolSchema } from "./tool-contracts.js";
 
 export { defineTool } from "./tool-contracts.js";
 export type { ToolContext, ToolDef, ToolResult } from "./tool-contracts.js";
-import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from './config.js';
-import type { RuntimeConfig } from './config.js';
+import { SERVER_NAME, SERVER_VERSION, runtimeConfig } from "./config.js";
+import type { RuntimeConfig } from "./config.js";
 import { log } from "./logger.js";
 import {
   registerPrompts,
@@ -99,7 +99,9 @@ export function createServer({
     config,
     toolNames: tools.map((tool) => tool.name),
   };
-  for (const tool of tools) {registerTool(server, tool, serverInfo);}
+  for (const tool of tools) {
+    registerTool(server, tool, serverInfo);
+  }
   registerResources(server);
   registerPrompts(server);
 
@@ -194,7 +196,7 @@ function registerTool(
         // Each round of a multi-round call takes the lock separately, so no lock is held while the
         // client waits on the user.
         const context = toolContext(server, ctx, serverInfo);
-        const execute =  async () => tool.handler(input, context);
+        const execute = async () => tool.handler(input, context);
         const lockCall = tool.writesRequired && tool.lock !== "handler";
         const result = lockCall
           ? await withMutationLock(execute)
@@ -207,7 +209,7 @@ function registerTool(
           });
           return result;
         }
-        const {structuredContent} = result;
+        const { structuredContent } = result;
         if (!isRecord(structuredContent)) {
           throw new MusicToolError(
             "script_error",

@@ -2,12 +2,12 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from '../applescript/runner.js';
-import type { ExecFn } from '../applescript/runner.js';
+import { runAppleScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
 import { persistentIdSchema } from "../config.js";
-import { defineTool, IDEMPOTENT_WRITE_ANNOTATIONS } from '../tool-contracts.js';
-import type { ToolSchemaOutput } from '../tool-contracts.js';
+import { defineTool, IDEMPOTENT_WRITE_ANNOTATIONS } from "../tool-contracts.js";
+import type { ToolSchemaOutput } from "../tool-contracts.js";
 import { MusicToolError } from "../types.js";
 
 const updateTrackInputSchema = z
@@ -71,11 +71,19 @@ export function planTrackWrites({
   rating,
 }: TrackUpdate): TrackWrites {
   const writes: TrackWrites = {};
-  if (favorited !== undefined) {writes.favorited = favorited;}
-  else if (disliked === true) {writes.favorited = false;}
-  if (disliked !== undefined) {writes.disliked = disliked;}
-  else if (favorited === true) {writes.disliked = false;}
-  if (rating !== undefined) {writes.rating = rating * 20;}
+  if (favorited !== undefined) {
+    writes.favorited = favorited;
+  } else if (disliked === true) {
+    writes.favorited = false;
+  }
+  if (disliked !== undefined) {
+    writes.disliked = disliked;
+  } else if (favorited === true) {
+    writes.disliked = false;
+  }
+  if (rating !== undefined) {
+    writes.rating = rating * 20;
+  }
   return writes;
 }
 

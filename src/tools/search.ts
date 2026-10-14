@@ -2,11 +2,11 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from '../applescript/runner.js';
-import type { ExecFn } from '../applescript/runner.js';
+import { runAppleScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
-import { defineTool, READ_ONLY_ANNOTATIONS } from '../tool-contracts.js';
-import type { ToolSchemaOutput } from '../tool-contracts.js';
+import { defineTool, READ_ONLY_ANNOTATIONS } from "../tool-contracts.js";
+import type { ToolSchemaOutput } from "../tool-contracts.js";
 import { durationOutputSchema, trackIdOutputSchema } from "./tracks.js";
 
 const searchLibraryInputSchema = z.object({
@@ -119,7 +119,7 @@ end jsonTracks`;
 
 export function createSearchOperations(execFn?: ExecFn) {
   return {
-    searchLibrary:  async (query: string, limit: number) =>
+    searchLibrary: async (query: string, limit: number) =>
       searchLibrary(query, limit, execFn),
   };
 }

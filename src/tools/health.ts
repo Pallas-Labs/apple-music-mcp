@@ -31,17 +31,22 @@ on error errMsg number errNum
 end try
 `;
   const result = await runAppleScript(script, 5000);
-  if (!result.stdout.startsWith("error:")) {return true;}
+  if (!result.stdout.startsWith("error:")) {
+    return true;
+  }
 
   const errorNumber = Number(result.stdout.replace("error:", ""));
-  if (errorNumber === -1743 || errorNumber === -10_004) {return false;}
+  if (errorNumber === -1743 || errorNumber === -10_004) {
+    return false;
+  }
   if (
     errorNumber === -600 ||
     errorNumber === -10_810 ||
     errorNumber === -1728 ||
     errorNumber === -43
-  )
-    {return false;}
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -53,12 +58,15 @@ async function getMusicHealth() {
     try {
       permissionGranted = await checkMusicPermission();
     } catch (error) {
-      if (!(error instanceof MusicToolError)) {throw error;}
+      if (!(error instanceof MusicToolError)) {
+        throw error;
+      }
       if (
         error.code !== "permission_denied" &&
         error.code !== "music_not_running"
-      )
-        {throw error;}
+      ) {
+        throw error;
+      }
     }
   }
 

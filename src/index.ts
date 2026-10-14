@@ -25,7 +25,9 @@ log("server_started", {
 
 let shuttingDown = false;
 function shutdown(): void {
-  if (shuttingDown) {return;}
+  if (shuttingDown) {
+    return;
+  }
   shuttingDown = true;
   log("server_shutdown", { name: SERVER_NAME });
   void handle.close().then(

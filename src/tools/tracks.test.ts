@@ -34,7 +34,10 @@ function trackColumns(tracks: LibraryTrack[]): Record<string, unknown[]> {
   };
 }
 
-interface ScriptCall { language: ScriptLanguage; whoseArgument: unknown }
+interface ScriptCall {
+  language: ScriptLanguage;
+  whoseArgument: unknown;
+}
 
 /**
  * An exec that runs the generated JXA against a fake Music library. The library answers every
@@ -50,7 +53,9 @@ function fakeMusicExec(columns: Record<string, unknown[]>): {
   const collection: Record<string, unknown> = { length: count };
   for (const [name, values] of Object.entries(columns)) {
     collection[name === "playCount" ? "playedCount" : name] = () => {
-      if (count === 0) {throw new Error("Can't get object.");}
+      if (count === 0) {
+        throw new Error("Can't get object.");
+      }
       return values;
     };
   }
@@ -109,7 +114,10 @@ function fakeMusic(options: FakeMusicOptions): {
     options.library.indexOf(track) + 1;
 
   type Kind = "library" | "playlist";
-  interface Spec { kind: Kind; index: number }
+  interface Spec {
+    kind: Kind;
+    index: number;
+  }
   const columns: Record<
     string,
     (track: LibraryTrack, index: number, kind: Kind) => unknown
@@ -132,7 +140,9 @@ function fakeMusic(options: FakeMusicOptions): {
     for (const [name, read] of Object.entries(columns)) {
       spec[name] = () => {
         const track = tracks()[index];
-        if (!track) {throw new Error(MUSIC_NOT_FOUND);}
+        if (!track) {
+          throw new Error(MUSIC_NOT_FOUND);
+        }
         return read(track, index, kind);
       };
     }
@@ -148,26 +158,32 @@ function fakeMusic(options: FakeMusicOptions): {
                 (track) => libraryDatabaseId(track) === databaseId
               )
             : entryIds.indexOf(databaseId);
-        if (index < 0 || index >= tracks().length)
-          {throw new Error(MUSIC_NOT_FOUND);}
+        if (index < 0 || index >= tracks().length) {
+          throw new Error(MUSIC_NOT_FOUND);
+        }
         return element(kind, tracks, index);
       },
       slice: (start: number, end: number) => {
-        if (start < 0 || end >= tracks().length)
-          {throw new Error("Message not understood.");}
+        if (start < 0 || end >= tracks().length) {
+          throw new Error("Message not understood.");
+        }
         const range = tracks().slice(start, end + 1);
         return collection(kind, () => (range.length === 1 ? [] : range));
       },
     };
     for (const [name, read] of Object.entries(columns)) {
       target[name] = () => {
-        if (tracks().length === 0) {throw new Error(MUSIC_NOT_FOUND);}
+        if (tracks().length === 0) {
+          throw new Error(MUSIC_NOT_FOUND);
+        }
         return tracks().map((track, index) => read(track, index, kind));
       };
     }
     return new Proxy(target, {
       get(object, property) {
-        if (property === "length") {return tracks().length;}
+        if (property === "length") {
+          return tracks().length;
+        }
         if (typeof property === "string" && /^\d+$/.test(property)) {
           return element(kind, tracks, Number(property));
         }

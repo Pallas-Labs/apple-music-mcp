@@ -57,9 +57,7 @@ describe("createPlaybackOperations.play", () => {
   test("reports the player state and the track now playing", async () => {
     const { operations } = recordingRunner(PLAYING_PAYLOAD);
     for (const kind of ["playlist", "track"] as const) {
-      expect(
-        await operations.play({ id: "ABCDEF1234567890", kind })
-      ).toEqual({
+      expect(await operations.play({ id: "ABCDEF1234567890", kind })).toEqual({
         playerState: "playing",
         track: TRACK,
       });
@@ -78,9 +76,10 @@ describe("createPlaybackOperations.play", () => {
 
   test("escapes the ID it interpolates", async () => {
     const { scripts, operations } = recordingRunner(PLAYING_PAYLOAD);
-    await operations.play(
-      { id: 'X" & (do shell script "id") & "', kind: "playlist" }
-    );
+    await operations.play({
+      id: 'X" & (do shell script "id") & "',
+      kind: "playlist",
+    });
     expect(scripts[0]).toContain(
       'persistent ID is "X\\" & (do shell script \\"id\\") & \\""'
     );
@@ -98,9 +97,10 @@ describe("createPlaybackOperations.play", () => {
       '{"found":true,"playerState":"rewinding","track":null}'
     );
     expect(
-      await rewinding.operations.play(
-        { id: "ABCDEF1234567890", kind: "playlist" }
-      )
+      await rewinding.operations.play({
+        id: "ABCDEF1234567890",
+        kind: "playlist",
+      })
     ).toEqual({ playerState: "stopped", track: null });
   });
 });

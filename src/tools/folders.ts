@@ -2,8 +2,8 @@ import * as z from "zod/v4";
 
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
-import { runAppleScript } from '../applescript/runner.js';
-import type { ExecFn } from '../applescript/runner.js';
+import { runAppleScript } from "../applescript/runner.js";
+import type { ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
 import { nameSchema, persistentIdSchema } from "../config.js";
 import {
@@ -176,9 +176,10 @@ function toFolder(row: z.output<typeof folderRowSchema>): Folder {
 
 export function createFolderOperations(execFn?: ExecFn) {
   return {
-    createFolder:  async (input: { name: string; parentId?: string }) =>
+    createFolder: async (input: { name: string; parentId?: string }) =>
       createFolder(input, execFn),
-    listFolders:  async (includeEmpty: boolean) => listFolders(includeEmpty, execFn),
+    listFolders: async (includeEmpty: boolean) =>
+      listFolders(includeEmpty, execFn),
   };
 }
 

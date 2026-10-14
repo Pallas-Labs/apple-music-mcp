@@ -1,5 +1,5 @@
-import { createServer as createHttpServer } from 'node:http';
-import type { IncomingMessage } from 'node:http';
+import { createServer as createHttpServer } from "node:http";
+import type { IncomingMessage } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
@@ -25,7 +25,9 @@ export function serveHttp(port: number): { close: () => Promise<void> } {
 
   const server = createHttpServer(async (req, res) => {
     const abort = new AbortController();
-    res.on("close", () =>{  abort.abort(); });
+    res.on("close", () => {
+      abort.abort();
+    });
     const request = toRequest(req, abort.signal);
     const response =
       new URL(request.url).pathname === ENDPOINT
@@ -57,7 +59,9 @@ export function serveHttp(port: number): { close: () => Promise<void> } {
 function toRequest(req: IncomingMessage, signal: AbortSignal): Request {
   const headers = new Headers();
   for (const [name, values] of Object.entries(req.headersDistinct)) {
-    for (const value of values ?? []) {headers.append(name, value);}
+    for (const value of values ?? []) {
+      headers.append(name, value);
+    }
   }
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   return new Request(`http://${req.headers.host ?? HOST}${req.url ?? "/"}`, {

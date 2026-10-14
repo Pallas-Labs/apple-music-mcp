@@ -46,7 +46,7 @@ end tell`;
     );
     await client.connect(
       new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
-        fetch:  async (url, init) => handler.fetch(new Request(url, init)),
+        fetch: async (url, init) => handler.fetch(new Request(url, init)),
       })
     );
     try {

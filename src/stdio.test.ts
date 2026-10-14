@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
-import { Client } from '@modelcontextprotocol/client';
-import type { ClientOptions, ProtocolEra } from '@modelcontextprotocol/client';
+import { Client } from "@modelcontextprotocol/client";
+import type { ClientOptions, ProtocolEra } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 import { allTools } from "./tools/index.js";
