@@ -1,7 +1,8 @@
-import * as z from "zod/v4";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import * as z from "zod/v4";
 
 export const SERVER_NAME = "apple-music-mcp";
 
@@ -11,7 +12,10 @@ function readServerVersion(): string {
   try {
     const raw = readFileSync(packageJsonPath, "utf8");
     const parsed = JSON.parse(raw) as { version?: string };
-    if (typeof parsed.version === "string" && parsed.version.trim().length > 0) {
+    if (
+      typeof parsed.version === "string" &&
+      parsed.version.trim().length > 0
+    ) {
       return parsed.version;
     }
   } catch {
@@ -39,7 +43,12 @@ export function readBooleanEnv(name: string): boolean {
   const value = process.env[name];
   if (!value) return false;
   const normalized = value.trim().toLowerCase();
-  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+  return (
+    normalized === "1" ||
+    normalized === "true" ||
+    normalized === "yes" ||
+    normalized === "on"
+  );
 }
 
 export const runtimeConfig = Object.freeze({

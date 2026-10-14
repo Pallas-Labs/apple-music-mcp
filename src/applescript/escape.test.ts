@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { escapeAppleScriptString, toJavaScriptLiteral } from "./escape.js";
 
 describe("escapeAppleScriptString", () => {
@@ -23,7 +24,9 @@ describe("escapeAppleScriptString", () => {
   });
 
   test("handles combined special chars", () => {
-    expect(escapeAppleScriptString('a\\b"c\nd\re\tf')).toBe('a\\\\b\\"c\\nd\\re\\tf');
+    expect(escapeAppleScriptString('a\\b"c\nd\re\tf')).toBe(
+      'a\\\\b\\"c\\nd\\re\\tf'
+    );
   });
 
   test("returns empty string unchanged", () => {
@@ -31,7 +34,9 @@ describe("escapeAppleScriptString", () => {
   });
 
   test("handles unicode", () => {
-    expect(escapeAppleScriptString("caf\u00e9 \u{1f600}")).toBe("caf\u00e9 \u{1f600}");
+    expect(escapeAppleScriptString("caf\u00e9 \u{1f600}")).toBe(
+      "caf\u00e9 \u{1f600}"
+    );
   });
 
   test("handles long strings without issue", () => {
@@ -48,7 +53,9 @@ describe("escapeAppleScriptString", () => {
 describe("toJavaScriptLiteral", () => {
   test("keeps quotes and backslashes inside the string literal", () => {
     const literal = toJavaScriptLiteral({ name: { _contains: 'a"b\\c' } });
-    expect(new Function(`return ${literal};`)()).toEqual({ name: { _contains: 'a"b\\c' } });
+    expect(new Function(`return ${literal};`)()).toEqual({
+      name: { _contains: 'a"b\\c' },
+    });
   });
 
   test("escapes the U+2028 and U+2029 line terminators JSON.stringify leaves raw", () => {

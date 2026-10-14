@@ -1,29 +1,34 @@
 import * as z from "zod/v4";
-import { persistentIdSchema } from "../config.js";
+
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
 import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
-import { MusicToolError } from "../types.js";
+import { persistentIdSchema } from "../config.js";
 import {
   defineTool,
   IDEMPOTENT_WRITE_ANNOTATIONS,
   type ToolSchemaOutput,
 } from "../tool-contracts.js";
+import { MusicToolError } from "../types.js";
 
 const updateTrackInputSchema = z
   .object({
     trackId: persistentIdSchema.describe(
-      "Persistent track ID from music.search_library, music.find_tracks, or music.get_playlist_tracks.",
+      "Persistent track ID from music.search_library, music.find_tracks, or music.get_playlist_tracks."
     ),
     favorited: z
       .boolean()
       .optional()
-      .describe("Mark or unmark the track as a favorite. true also clears disliked."),
+      .describe(
+        "Mark or unmark the track as a favorite. true also clears disliked."
+      ),
     disliked: z
       .boolean()
       .optional()
-      .describe("Mark or unmark the track as disliked. true also clears favorited."),
+      .describe(
+        "Mark or unmark the track as disliked. true also clears favorited."
+      ),
     rating: z
       .number()
       .int()
@@ -34,8 +39,10 @@ const updateTrackInputSchema = z
   })
   .refine(
     (input) =>
-      input.favorited !== undefined || input.disliked !== undefined || input.rating !== undefined,
-    { message: "Give at least one of favorited, disliked, or rating." },
+      input.favorited !== undefined ||
+      input.disliked !== undefined ||
+      input.rating !== undefined,
+    { message: "Give at least one of favorited, disliked, or rating." }
   )
   .refine((input) => !(input.favorited === true && input.disliked === true), {
     message: "A track cannot be both favorited and disliked.",
@@ -47,16 +54,24 @@ const updateTrackOutputSchema = z.object({
   rating: z
     .number()
     .int()
-    .describe("Star rating from 0 to 5, rounded. Music may derive it from the album rating."),
+    .describe(
+      "Star rating from 0 to 5, rounded. Music may derive it from the album rating."
+    ),
 });
 
 type TrackUpdate = ToolSchemaOutput<typeof updateTrackInputSchema>;
 type TrackFlag = "favorited" | "disliked";
 /** Property writes in Music's units: booleans for the flags, 0-100 for rating. */
-export type TrackWrites = Partial<Record<TrackFlag, boolean>> & { rating?: number };
+export type TrackWrites = Partial<Record<TrackFlag, boolean>> & {
+  rating?: number;
+};
 
 /** Turn a request into Music property writes, clearing the opposite flag of one set to true. */
-export function planTrackWrites({ favorited, disliked, rating }: TrackUpdate): TrackWrites {
+export function planTrackWrites({
+  favorited,
+  disliked,
+  rating,
+}: TrackUpdate): TrackWrites {
   const writes: TrackWrites = {};
   if (favorited !== undefined) writes.favorited = favorited;
   else if (disliked === true) writes.favorited = false;
@@ -76,13 +91,17 @@ const updateTrackScriptResultSchema = z.discriminatedUnion("found", [
   }),
 ]);
 
-export function buildUpdateTrackScript(trackId: string, writes: TrackWrites): string {
+export function buildUpdateTrackScript(
+  trackId: string,
+  writes: TrackWrites
+): string {
   // False flags go first so that, if Music clears one flag when another is set, the true one wins.
   const flagWrites = (["favorited", "disliked"] as const)
     .filter((flag) => writes[flag] !== undefined)
     .sort((left, right) => Number(writes[left]) - Number(writes[right]))
     .map((flag) => `set ${flag} of t to ${writes[flag]}`);
-  const ratingWrite = writes.rating === undefined ? [] : [`set rating of t to ${writes.rating}`];
+  const ratingWrite =
+    writes.rating === undefined ? [] : [`set rating of t to ${writes.rating}`];
   return buildScript(`
 try
     tell application id "com.apple.Music"
@@ -102,14 +121,21 @@ end try`);
 export function createLibraryOperations(execFn?: ExecFn) {
   return {
     async updateTrack(trackId: string, writes: TrackWrites) {
-      const result = await runAppleScript(buildUpdateTrackScript(trackId, writes), 40_000, execFn);
+      const result = await runAppleScript(
+        buildUpdateTrackScript(trackId, writes),
+        40_000,
+        execFn
+      );
       const parsed = parseAppleScriptJson(
         result.stdout,
         updateTrackScriptResultSchema,
-        "Music returned an invalid track update payload.",
+        "Music returned an invalid track update payload."
       );
       if (!parsed.found) {
-        throw new MusicToolError("not_found", `No library track has the ID ${trackId}.`);
+        throw new MusicToolError(
+          "not_found",
+          `No library track has the ID ${trackId}.`
+        );
       }
       return {
         trackId,
@@ -141,7 +167,10 @@ export const updateTrackTool = defineTool({
     };
   },
   async handler(input) {
-    const result = await libraryOperations.updateTrack(input.trackId, planTrackWrites(input));
+    const result = await libraryOperations.updateTrack(
+      input.trackId,
+      planTrackWrites(input)
+    );
     return { structuredContent: result, logData: { trackId: input.trackId } };
   },
 });

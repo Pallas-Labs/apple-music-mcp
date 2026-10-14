@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import vm from "node:vm";
+
+import type { ExecFn, ScriptLanguage } from "../applescript/runner.js";
+import type { LibraryTrack } from "../types.js";
 import {
   FIND_TRACKS_CANDIDATE_CAP,
   createTrackOperations,
   matchesTrackCriteria,
   pickFindTracksPrefilter,
 } from "./tracks.js";
-import type { ExecFn, ScriptLanguage } from "../applescript/runner.js";
-import type { LibraryTrack } from "../types.js";
 
 const sampleTrack: LibraryTrack = {
   id: "ABCDEF1234567890",
@@ -40,7 +41,10 @@ type ScriptCall = { language: ScriptLanguage; whoseArgument: unknown };
  * whose clause with the given columns, and throws on property reads of an empty result as Music
  * does.
  */
-function fakeMusicExec(columns: Record<string, unknown[]>): { exec: ExecFn; calls: ScriptCall[] } {
+function fakeMusicExec(columns: Record<string, unknown[]>): {
+  exec: ExecFn;
+  calls: ScriptCall[];
+} {
   const calls: ScriptCall[] = [];
   const count = columns["persistentID"]?.length ?? 0;
   const collection: Record<string, unknown> = { length: count };
@@ -65,7 +69,10 @@ function fakeMusicExec(columns: Record<string, unknown[]>): { exec: ExecFn; call
       launch: () => undefined,
       libraryPlaylists: [{ tracks }],
     });
-    const stdout = vm.runInNewContext(script, { Application, delay: () => undefined });
+    const stdout = vm.runInNewContext(script, {
+      Application,
+      delay: () => undefined,
+    });
     return { stdout, stderr: "" };
   };
   return { exec, calls };
@@ -88,20 +95,28 @@ const MUSIC_NOT_FOUND = "Can't get object. (-1728)";
  * -1728 on property reads of an empty whose result. Returns the playlist's live entries so tests
  * can assert on the end state.
  */
-function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: LibraryTrack[] } {
+function fakeMusic(options: FakeMusicOptions): {
+  exec: ExecFn;
+  playlistTracks: LibraryTrack[];
+} {
   const playlistTracks = [...(options.playlist?.tracks ?? [])];
   // Each playlist entry carries its own database ID in Music, distinct from the library track's.
   const entryIds = playlistTracks.map((_, index) => 1000 + index);
   let nextEntryId = 1000 + playlistTracks.length;
   const failDuplicate = new Set(options.failDuplicate ?? []);
   const failDeleteAt = new Set(options.failDeleteAt ?? []);
-  const libraryDatabaseId = (track: LibraryTrack) => options.library.indexOf(track) + 1;
+  const libraryDatabaseId = (track: LibraryTrack) =>
+    options.library.indexOf(track) + 1;
 
   type Kind = "library" | "playlist";
   type Spec = { kind: Kind; index: number };
-  const columns: Record<string, (track: LibraryTrack, index: number, kind: Kind) => unknown> = {
+  const columns: Record<
+    string,
+    (track: LibraryTrack, index: number, kind: Kind) => unknown
+  > = {
     persistentID: (track) => track.id,
-    id: (track, index, kind) => (kind === "library" ? libraryDatabaseId(track) : entryIds[index]),
+    id: (track, index, kind) =>
+      kind === "library" ? libraryDatabaseId(track) : entryIds[index],
     name: (track) => track.name,
     artist: (track) => track.artist,
     album: (track) => track.album,
@@ -129,13 +144,17 @@ function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: L
       byId: (databaseId: number) => {
         const index =
           kind === "library"
-            ? options.library.findIndex((track) => libraryDatabaseId(track) === databaseId)
+            ? options.library.findIndex(
+                (track) => libraryDatabaseId(track) === databaseId
+              )
             : entryIds.indexOf(databaseId);
-        if (index < 0 || index >= tracks().length) throw new Error(MUSIC_NOT_FOUND);
+        if (index < 0 || index >= tracks().length)
+          throw new Error(MUSIC_NOT_FOUND);
         return element(kind, tracks, index);
       },
       slice: (start: number, end: number) => {
-        if (start < 0 || end >= tracks().length) throw new Error("Message not understood.");
+        if (start < 0 || end >= tracks().length)
+          throw new Error("Message not understood.");
         const range = tracks().slice(start, end + 1);
         return collection(kind, () => (range.length === 1 ? [] : range));
       },
@@ -167,7 +186,8 @@ function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: L
     userPlaylists: {
       whose: (argument: { persistentID: string }) =>
         options.playlist &&
-        options.playlist.id.toUpperCase() === argument.persistentID.toUpperCase()
+        options.playlist.id.toUpperCase() ===
+          argument.persistentID.toUpperCase()
           ? [playlistObject]
           : [
               {
@@ -189,7 +209,9 @@ function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: L
         to !== playlistObject ||
         failDuplicate.has(track.id)
       ) {
-        throw new Error("Music got an error: Can't make or move that element into that container.");
+        throw new Error(
+          "Music got an error: Can't make or move that element into that container."
+        );
       }
       playlistTracks.push(track);
       entryIds.push(nextEntryId);
@@ -199,7 +221,8 @@ function fakeMusic(options: FakeMusicOptions): { exec: ExecFn; playlistTracks: L
       if (spec.kind !== "playlist" || spec.index >= playlistTracks.length) {
         throw new Error(MUSIC_NOT_FOUND);
       }
-      if (failDeleteAt.has(spec.index)) throw new Error("Music got an error: Can't delete.");
+      if (failDeleteAt.has(spec.index))
+        throw new Error("Music got an error: Can't delete.");
       playlistTracks.splice(spec.index, 1);
       entryIds.splice(spec.index, 1);
     },
@@ -239,8 +262,12 @@ describe("pickFindTracksPrefilter", () => {
         artist: "LB aka LABAT",
         album: "Feel So Good Around U",
         yearMin: 2000,
-      }),
-    ).toEqual({ property: "album", operator: "_contains", value: "Feel So Good Around U" });
+      })
+    ).toEqual({
+      property: "album",
+      operator: "_contains",
+      value: "Feel So Good Around U",
+    });
   });
 
   test("maps numeric bounds to inclusive comparisons", () => {
@@ -279,7 +306,7 @@ describe("matchesTrackCriteria", () => {
         artist: "labat",
         album: "feel so good",
         genre: "electronic",
-      }),
+      })
     ).toBe(true);
   });
 
@@ -287,13 +314,13 @@ describe("matchesTrackCriteria", () => {
     expect(
       matchesTrackCriteria(sampleTrack, {
         yearMin: 2025,
-      }),
+      })
     ).toBe(false);
 
     expect(
       matchesTrackCriteria(sampleTrack, {
         playCountMax: 3,
-      }),
+      })
     ).toBe(false);
   });
 });
@@ -304,28 +331,48 @@ describe("createTrackOperations.findTracks", () => {
     const operations = createTrackOperations(exec);
 
     await expect(operations.findTracks({})).rejects.toThrow(
-      "At least one track filter is required.",
+      "At least one track filter is required."
     );
-    await expect(operations.findTracks({ yearMin: 2025, yearMax: 2020 })).rejects.toThrow(
-      "yearMin must be less than or equal to yearMax.",
-    );
-    await expect(operations.findTracks({ playCountMin: 10, playCountMax: 2 })).rejects.toThrow(
-      "playCountMin must be less than or equal to playCountMax.",
+    await expect(
+      operations.findTracks({ yearMin: 2025, yearMax: 2020 })
+    ).rejects.toThrow("yearMin must be less than or equal to yearMax.");
+    await expect(
+      operations.findTracks({ playCountMin: 10, playCountMax: 2 })
+    ).rejects.toThrow(
+      "playCountMin must be less than or equal to playCountMax."
     );
     expect(calls).toHaveLength(0);
   });
 
   test("asks Music for the text filter and reads matching rows column by column", async () => {
     const tracks = [
-      { ...sampleTrack, id: "TRACK00000000001", name: "Love Lost", year: 2001, playCount: 1 },
-      { ...sampleTrack, id: "TRACK00000000002", name: "Glove", year: 2002, playCount: 9 },
+      {
+        ...sampleTrack,
+        id: "TRACK00000000001",
+        name: "Love Lost",
+        year: 2001,
+        playCount: 1,
+      },
+      {
+        ...sampleTrack,
+        id: "TRACK00000000002",
+        name: "Glove",
+        year: 2002,
+        playCount: 9,
+      },
     ];
     const { exec, calls } = fakeMusicExec(trackColumns(tracks));
     const operations = createTrackOperations(exec);
 
-    const result = await operations.findTracks({ nameQuery: "love", playCountMin: 0 });
+    const result = await operations.findTracks({
+      nameQuery: "love",
+      playCountMin: 0,
+    });
     expect(calls).toEqual([
-      { language: "JavaScript", whoseArgument: { name: { _contains: "love" } } },
+      {
+        language: "JavaScript",
+        whoseArgument: { name: { _contains: "love" } },
+      },
     ]);
     expect(result).toEqual({
       tracks: [tracks[1]!, tracks[0]!],
@@ -340,8 +387,13 @@ describe("createTrackOperations.findTracks", () => {
     const { exec, calls } = fakeMusicExec(trackColumns([]));
     const operations = createTrackOperations(exec);
 
-    const result = await operations.findTracks({ yearMin: 2000, yearMax: 2010 });
-    expect(calls[0]!.whoseArgument).toEqual({ year: { _lessThanEquals: 2010 } });
+    const result = await operations.findTracks({
+      yearMin: 2000,
+      yearMax: 2010,
+    });
+    expect(calls[0]!.whoseArgument).toEqual({
+      year: { _lessThanEquals: 2010 },
+    });
     expect(result).toEqual({
       tracks: [],
       totalMatched: 0,
@@ -362,10 +414,34 @@ describe("createTrackOperations.findTracks", () => {
 
   test("applies the filters Music did not evaluate, then sorts and limits", async () => {
     const tracks = [
-      { ...sampleTrack, id: "TRACK00000000001", artist: "Skeler", year: 1999, playCount: 5 },
-      { ...sampleTrack, id: "TRACK00000000002", artist: "Skeler", year: 2005, playCount: 3 },
-      { ...sampleTrack, id: "TRACK00000000003", artist: "Skeler", year: 2005, playCount: 8 },
-      { ...sampleTrack, id: "TRACK00000000004", artist: "Skeler", year: 2007, playCount: 6 },
+      {
+        ...sampleTrack,
+        id: "TRACK00000000001",
+        artist: "Skeler",
+        year: 1999,
+        playCount: 5,
+      },
+      {
+        ...sampleTrack,
+        id: "TRACK00000000002",
+        artist: "Skeler",
+        year: 2005,
+        playCount: 3,
+      },
+      {
+        ...sampleTrack,
+        id: "TRACK00000000003",
+        artist: "Skeler",
+        year: 2005,
+        playCount: 8,
+      },
+      {
+        ...sampleTrack,
+        id: "TRACK00000000004",
+        artist: "Skeler",
+        year: 2007,
+        playCount: 6,
+      },
     ];
     const { exec } = fakeMusicExec(trackColumns(tracks));
     const operations = createTrackOperations(exec);
@@ -386,15 +462,22 @@ describe("createTrackOperations.findTracks", () => {
   });
 
   test("stops reading at the safety cap and reports truncation", async () => {
-    const tracks = Array.from({ length: FIND_TRACKS_CANDIDATE_CAP + 3 }, (_, index) => ({
-      ...sampleTrack,
-      id: `TRACK${index.toString().padStart(11, "0")}`,
-      playCount: index,
-    }));
+    const tracks = Array.from(
+      { length: FIND_TRACKS_CANDIDATE_CAP + 3 },
+      (_, index) => ({
+        ...sampleTrack,
+        id: `TRACK${index.toString().padStart(11, "0")}`,
+        playCount: index,
+      })
+    );
     const { exec } = fakeMusicExec(trackColumns(tracks));
     const operations = createTrackOperations(exec);
 
-    const result = await operations.findTracks({ playCountMin: 0, sortBy: "playCount", limit: 1 });
+    const result = await operations.findTracks({
+      playCountMin: 0,
+      sortBy: "playCount",
+      limit: 1,
+    });
     expect(result.scanned).toBe(FIND_TRACKS_CANDIDATE_CAP);
     expect(result.truncated).toBe(true);
     expect(result.totalMatched).toBe(FIND_TRACKS_CANDIDATE_CAP);
@@ -402,12 +485,17 @@ describe("createTrackOperations.findTracks", () => {
   });
 
   test("fails when Music returns columns of different lengths", async () => {
-    const columns = trackColumns([sampleTrack, { ...sampleTrack, id: "TRACK00000000002" }]);
+    const columns = trackColumns([
+      sampleTrack,
+      { ...sampleTrack, id: "TRACK00000000002" },
+    ]);
     columns["year"] = [2024];
     const { exec } = fakeMusicExec(columns);
     const operations = createTrackOperations(exec);
 
-    await expect(operations.findTracks({ yearMin: 2000 })).rejects.toMatchObject({
+    await expect(
+      operations.findTracks({ yearMin: 2000 })
+    ).rejects.toMatchObject({
       code: "script_error",
     });
   });
@@ -425,7 +513,11 @@ describe("createTrackOperations.findTracks", () => {
     };
     const payloads: unknown[] = [
       { tracks: "not-an-array", scanned: 1, truncated: false },
-      { columns: { ...validColumns, years: ["2001"] }, scanned: 1, truncated: false },
+      {
+        columns: { ...validColumns, years: ["2001"] },
+        scanned: 1,
+        truncated: false,
+      },
       { columns: { ...validColumns, names: [] }, scanned: 1, truncated: false },
       { columns: validColumns, scanned: 2, truncated: false },
       { columns: validColumns, scanned: 1, truncated: "no" },
@@ -436,31 +528,56 @@ describe("createTrackOperations.findTracks", () => {
         stdout: typeof payload === "string" ? payload : JSON.stringify(payload),
         stderr: "",
       }));
-      await expect(operations.findTracks({ yearMin: 2000 })).rejects.toMatchObject({
+      await expect(
+        operations.findTracks({ yearMin: 2000 })
+      ).rejects.toMatchObject({
         code: "script_error",
       });
     }
 
     const operations = createTrackOperations(async () => ({
-      stdout: JSON.stringify({ columns: validColumns, scanned: 1, truncated: false }),
+      stdout: JSON.stringify({
+        columns: validColumns,
+        scanned: 1,
+        truncated: false,
+      }),
       stderr: "",
     }));
-    await expect(operations.findTracks({ yearMin: 2000 })).resolves.toMatchObject({
-      tracks: [{ id: "TRACK00000000001", name: "Love", year: 2001, playCount: 3 }],
+    await expect(
+      operations.findTracks({ yearMin: 2000 })
+    ).resolves.toMatchObject({
+      tracks: [
+        { id: "TRACK00000000001", name: "Love", year: 2001, playCount: 3 },
+      ],
       totalMatched: 1,
     });
   });
 
   test("matches text filters without regard to case or Unicode line terminators", async () => {
     const tracks = [
-      { ...sampleTrack, id: "TRACK00000000001", name: "ÉLAN VITAL", artist: "Mixed Case" },
-      { ...sampleTrack, id: "TRACK00000000002", name: "elan", artist: "mixed case" },
+      {
+        ...sampleTrack,
+        id: "TRACK00000000001",
+        name: "ÉLAN VITAL",
+        artist: "Mixed Case",
+      },
+      {
+        ...sampleTrack,
+        id: "TRACK00000000002",
+        name: "elan",
+        artist: "mixed case",
+      },
     ];
     const { exec } = fakeMusicExec(trackColumns(tracks));
     const operations = createTrackOperations(exec);
 
-    const result = await operations.findTracks({ nameQuery: "élan", artist: "MIXED" });
-    expect(result.tracks.map((track) => track.id)).toEqual(["TRACK00000000001"]);
+    const result = await operations.findTracks({
+      nameQuery: "élan",
+      artist: "MIXED",
+    });
+    expect(result.tracks.map((track) => track.id)).toEqual([
+      "TRACK00000000001",
+    ]);
   });
 });
 
@@ -475,10 +592,15 @@ describe("createTrackOperations.getPlaylistTracks", () => {
   });
 
   test("returns the requested page with the playlist total", async () => {
-    const { exec } = fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: library } });
+    const { exec } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: library },
+    });
     const operations = createTrackOperations(exec);
 
-    await expect(operations.getPlaylistTracks("playlist12345678", 1, 2)).resolves.toEqual({
+    await expect(
+      operations.getPlaylistTracks("playlist12345678", 1, 2)
+    ).resolves.toEqual({
       tracks: [page(library[1]!), page(library[2]!)],
       total: 5,
       offset: 1,
@@ -487,10 +609,15 @@ describe("createTrackOperations.getPlaylistTracks", () => {
   });
 
   test("returns a final page holding a single track", async () => {
-    const { exec } = fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: library } });
+    const { exec } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: library },
+    });
     const operations = createTrackOperations(exec);
 
-    await expect(operations.getPlaylistTracks("PLAYLIST12345678", 4, 10)).resolves.toEqual({
+    await expect(
+      operations.getPlaylistTracks("PLAYLIST12345678", 4, 10)
+    ).resolves.toEqual({
       tracks: [page(library[4]!)],
       total: 5,
       offset: 4,
@@ -500,9 +627,14 @@ describe("createTrackOperations.getPlaylistTracks", () => {
 
   test("returns an empty page past the end and for an empty playlist", async () => {
     const full = createTrackOperations(
-      fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: library } }).exec,
+      fakeMusic({
+        library,
+        playlist: { id: "PLAYLIST12345678", tracks: library },
+      }).exec
     );
-    await expect(full.getPlaylistTracks("PLAYLIST12345678", 5, 50)).resolves.toEqual({
+    await expect(
+      full.getPlaylistTracks("PLAYLIST12345678", 5, 50)
+    ).resolves.toEqual({
       tracks: [],
       total: 5,
       offset: 5,
@@ -510,9 +642,12 @@ describe("createTrackOperations.getPlaylistTracks", () => {
     });
 
     const empty = createTrackOperations(
-      fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: [] } }).exec,
+      fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: [] } })
+        .exec
     );
-    await expect(empty.getPlaylistTracks("PLAYLIST12345678", 0, 50)).resolves.toEqual({
+    await expect(
+      empty.getPlaylistTracks("PLAYLIST12345678", 0, 50)
+    ).resolves.toEqual({
       tracks: [],
       total: 0,
       offset: 0,
@@ -521,25 +656,39 @@ describe("createTrackOperations.getPlaylistTracks", () => {
   });
 
   test("fails with not_found for unknown and hostile playlist IDs", async () => {
-    const { exec } = fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: library } });
+    const { exec } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: library },
+    });
     const operations = createTrackOperations(exec);
     const hostile = `A"); throw new Error("pwned"); (\`${String.fromCharCode(0x2028)}`;
 
-    await expect(operations.getPlaylistTracks("PLAYLIST00000000", 0, 50)).rejects.toMatchObject({
+    await expect(
+      operations.getPlaylistTracks("PLAYLIST00000000", 0, 50)
+    ).rejects.toMatchObject({
       code: "not_found",
     });
-    await expect(operations.getPlaylistTracks(hostile, 0, 50)).rejects.toMatchObject({
+    await expect(
+      operations.getPlaylistTracks(hostile, 0, 50)
+    ).rejects.toMatchObject({
       code: "not_found",
     });
   });
 
   test("rejects schema-invalid script payloads", async () => {
     const operations = createTrackOperations(async () => ({
-      stdout: JSON.stringify({ tracks: [{ id: "X" }], total: 1, offset: 0, limit: 50 }),
+      stdout: JSON.stringify({
+        tracks: [{ id: "X" }],
+        total: 1,
+        offset: 0,
+        limit: 50,
+      }),
       stderr: "",
     }));
 
-    await expect(operations.getPlaylistTracks("PLAYLIST12345678", 0, 50)).rejects.toMatchObject({
+    await expect(
+      operations.getPlaylistTracks("PLAYLIST12345678", 0, 50)
+    ).rejects.toMatchObject({
       code: "script_error",
     });
   });
@@ -568,7 +717,7 @@ describe("createTrackOperations.addTracksToPlaylist", () => {
         "FFFFFFFFFFFFFFF0",
         track3.id,
         track1.id,
-      ]),
+      ])
     ).resolves.toEqual({
       playlistId: "PLAYLIST12345678",
       requested: 4,
@@ -595,10 +744,15 @@ describe("createTrackOperations.addTracksToPlaylist", () => {
   });
 
   test("reports every ID missing against an empty library", async () => {
-    const { exec } = fakeMusic({ library: [], playlist: { id: "PLAYLIST12345678", tracks: [] } });
+    const { exec } = fakeMusic({
+      library: [],
+      playlist: { id: "PLAYLIST12345678", tracks: [] },
+    });
     const operations = createTrackOperations(exec);
 
-    const result = await operations.addTracksToPlaylist("PLAYLIST12345678", [track0.id]);
+    const result = await operations.addTracksToPlaylist("PLAYLIST12345678", [
+      track0.id,
+    ]);
     expect(result.missingTrackIds).toEqual([track0.id]);
     expect(result.added).toBe(0);
   });
@@ -608,7 +762,7 @@ describe("createTrackOperations.addTracksToPlaylist", () => {
     const operations = createTrackOperations(exec);
 
     await expect(
-      operations.addTracksToPlaylist("PLAYLIST12345678", [track0.id]),
+      operations.addTracksToPlaylist("PLAYLIST12345678", [track0.id])
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
@@ -620,10 +774,15 @@ describe("createTrackOperations.addTracksToPlaylist", () => {
     });
     const operations = createTrackOperations(exec);
 
-    const result = await operations.addTracksToPlaylist("PLAYLIST12345678", [hostile, track0.id]);
+    const result = await operations.addTracksToPlaylist("PLAYLIST12345678", [
+      hostile,
+      track0.id,
+    ]);
     expect(result.missingTrackIds).toEqual([hostile]);
     expect(playlistTracks).toEqual([track0]);
-    await expect(operations.addTracksToPlaylist(hostile, [track0.id])).rejects.toMatchObject({
+    await expect(
+      operations.addTracksToPlaylist(hostile, [track0.id])
+    ).rejects.toMatchObject({
       code: "not_found",
     });
   });
@@ -631,20 +790,26 @@ describe("createTrackOperations.addTracksToPlaylist", () => {
 
 describe("createTrackOperations.removeTracksFromPlaylist", () => {
   const library = libraryOf(4);
-  const [trackA, trackB, trackC] = library as [LibraryTrack, LibraryTrack, LibraryTrack];
+  const [trackA, trackB, trackC] = library as [
+    LibraryTrack,
+    LibraryTrack,
+    LibraryTrack,
+  ];
 
   test("removes every instance of each requested track and reports missing IDs", async () => {
     const { exec, playlistTracks } = fakeMusic({
       library,
-      playlist: { id: "PLAYLIST12345678", tracks: [trackA, trackB, trackA, trackC] },
+      playlist: {
+        id: "PLAYLIST12345678",
+        tracks: [trackA, trackB, trackA, trackC],
+      },
     });
     const operations = createTrackOperations(exec);
 
-    const result = await operations.removeTracksFromPlaylist("PLAYLIST12345678", [
-      trackA.id,
-      trackC.id,
-      "FFFFFFFFFFFFFFF0",
-    ]);
+    const result = await operations.removeTracksFromPlaylist(
+      "PLAYLIST12345678",
+      [trackA.id, trackC.id, "FFFFFFFFFFFFFFF0"]
+    );
     expect(result).toMatchObject({
       playlistId: "PLAYLIST12345678",
       requested: 3,
@@ -652,7 +817,9 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
       missingTrackIds: ["FFFFFFFFFFFFFFF0"],
       failedTrackIds: [],
     });
-    expect([...result.removedTrackIds].sort()).toEqual([trackA.id, trackC.id].sort());
+    expect([...result.removedTrackIds].sort()).toEqual(
+      [trackA.id, trackC.id].sort()
+    );
     expect(playlistTracks).toEqual([trackB]);
   });
 
@@ -665,7 +832,7 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
     const operations = createTrackOperations(exec);
 
     await expect(
-      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id]),
+      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id])
     ).resolves.toEqual({
       playlistId: "PLAYLIST12345678",
       requested: 1,
@@ -684,19 +851,26 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
     });
     const operations = createTrackOperations(exec);
 
-    const result = await operations.removeTracksFromPlaylist("playlist12345678", [
-      trackB.id.toLowerCase(),
-    ]);
+    const result = await operations.removeTracksFromPlaylist(
+      "playlist12345678",
+      [trackB.id.toLowerCase()]
+    );
     expect(result.removedTrackIds).toEqual([trackB.id.toLowerCase()]);
     expect(playlistTracks).toEqual([trackA]);
   });
 
   test("reports every ID missing against an empty playlist", async () => {
-    const { exec } = fakeMusic({ library, playlist: { id: "PLAYLIST12345678", tracks: [] } });
+    const { exec } = fakeMusic({
+      library,
+      playlist: { id: "PLAYLIST12345678", tracks: [] },
+    });
     const operations = createTrackOperations(exec);
 
     await expect(
-      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id, trackB.id]),
+      operations.removeTracksFromPlaylist("PLAYLIST12345678", [
+        trackA.id,
+        trackB.id,
+      ])
     ).resolves.toMatchObject({
       removed: 0,
       removedTrackIds: [],
@@ -710,7 +884,7 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
     const operations = createTrackOperations(exec);
 
     await expect(
-      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id]),
+      operations.removeTracksFromPlaylist("PLAYLIST12345678", [trackA.id])
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
@@ -722,10 +896,15 @@ describe("createTrackOperations.removeTracksFromPlaylist", () => {
     });
     const operations = createTrackOperations(exec);
 
-    const result = await operations.removeTracksFromPlaylist("PLAYLIST12345678", [hostile]);
+    const result = await operations.removeTracksFromPlaylist(
+      "PLAYLIST12345678",
+      [hostile]
+    );
     expect(result.missingTrackIds).toEqual([hostile]);
     expect(playlistTracks).toEqual([trackA]);
-    await expect(operations.removeTracksFromPlaylist(hostile, [trackA.id])).rejects.toMatchObject({
+    await expect(
+      operations.removeTracksFromPlaylist(hostile, [trackA.id])
+    ).rejects.toMatchObject({
       code: "not_found",
     });
   });
@@ -750,7 +929,7 @@ describe("createTrackOperations mutations", () => {
         "TRACK00000000001",
         "TRACK00000000002",
         "TRACK00000000003",
-      ]),
+      ])
     ).resolves.toEqual({
       playlistId: "PLAYLIST12345678",
       requested: 3,
@@ -775,7 +954,10 @@ describe("createTrackOperations mutations", () => {
     }));
 
     await expect(
-      operations.addTracksToPlaylist("PLAYLIST12345678", ["TRACK00000000001", "TRACK00000000002"]),
+      operations.addTracksToPlaylist("PLAYLIST12345678", [
+        "TRACK00000000001",
+        "TRACK00000000002",
+      ])
     ).rejects.toMatchObject({ code: "script_error" });
   });
 
@@ -798,7 +980,7 @@ describe("createTrackOperations mutations", () => {
         "TRACK00000000002",
         "TRACK00000000003",
         "TRACK00000000004",
-      ]),
+      ])
     ).resolves.toEqual({
       playlistId: "PLAYLIST12345678",
       requested: 4,
@@ -825,7 +1007,7 @@ describe("createTrackOperations mutations", () => {
       addOperations.addTracksToPlaylist("playlist12345678", [
         "TRACK00000000001",
         "TRACK00000000002",
-      ]),
+      ])
     ).rejects.toMatchObject({ code: "script_error" });
 
     const removeOperations = createTrackOperations(async () => ({
@@ -843,7 +1025,7 @@ describe("createTrackOperations mutations", () => {
       removeOperations.removeTracksFromPlaylist("playlist12345678", [
         "TRACK00000000001",
         "TRACK00000000002",
-      ]),
+      ])
     ).rejects.toMatchObject({ code: "script_error" });
   });
   test("rejects duplicate IDs before invoking AppleScript", async () => {
@@ -854,13 +1036,16 @@ describe("createTrackOperations mutations", () => {
     });
 
     await expect(
-      operations.addTracksToPlaylist("PLAYLIST12345678", ["TRACK00000000001", "TRACK00000000001"]),
+      operations.addTracksToPlaylist("PLAYLIST12345678", [
+        "TRACK00000000001",
+        "TRACK00000000001",
+      ])
     ).rejects.toThrow("Track IDs must be unique.");
     await expect(
       operations.removeTracksFromPlaylist("PLAYLIST12345678", [
         "TRACK00000000001",
         "TRACK00000000001",
-      ]),
+      ])
     ).rejects.toThrow("Track IDs must be unique.");
     expect(invocations).toBe(0);
   });

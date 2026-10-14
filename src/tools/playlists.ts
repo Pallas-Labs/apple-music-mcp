@@ -1,15 +1,17 @@
 import * as z from "zod/v4";
-import { nameSchema, persistentIdSchema } from "../config.js";
+
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
 import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
+import { nameSchema, persistentIdSchema } from "../config.js";
 import { withMutationLock } from "../mutation-lock.js";
 import {
   ADDITIVE_WRITE_ANNOTATIONS,
   defineTool,
   READ_ONLY_ANNOTATIONS,
 } from "../tool-contracts.js";
+import { readParentIds, readPlaylistEntries } from "./playlist-tree.js";
 import {
   addTracksToPlaylist,
   findTracks,
@@ -18,7 +20,6 @@ import {
   truncatedOutputSchema,
   type AddTracksResult,
 } from "./tracks.js";
-import { readParentIds, readPlaylistEntries } from "./playlist-tree.js";
 
 export const playlistSchema = z.object({
   id: z.string().describe("Persistent playlist ID."),
@@ -26,12 +27,18 @@ export const playlistSchema = z.object({
   folderId: z
     .string()
     .optional()
-    .describe("Persistent ID of the parent folder. Omitted for top-level playlists."),
-  isSmart: z.boolean().describe("True for smart playlists and built-in special playlists."),
+    .describe(
+      "Persistent ID of the parent folder. Omitted for top-level playlists."
+    ),
+  isSmart: z
+    .boolean()
+    .describe("True for smart playlists and built-in special playlists."),
   trackCount: z
     .number()
     .optional()
-    .describe("Number of tracks. Omitted by music.list_playlists to keep listing fast."),
+    .describe(
+      "Number of tracks. Omitted by music.list_playlists to keep listing fast."
+    ),
 });
 export type Playlist = z.output<typeof playlistSchema>;
 /** A playlist as the scripts print it: folderId is "" at the top level, trackCount -1 when not counted. */
@@ -43,12 +50,14 @@ const listPlaylistsInputSchema = z.object({
   folderId: persistentIdSchema
     .optional()
     .describe(
-      "Persistent folder ID from music.list_folders or music.create_folder. Returns only playlists directly inside it.",
+      "Persistent folder ID from music.list_folders or music.create_folder. Returns only playlists directly inside it."
     ),
   includeRoot: z
     .boolean()
     .optional()
-    .describe("Include top-level playlists (default true). Ignored when folderId is set."),
+    .describe(
+      "Include top-level playlists (default true). Ignored when folderId is set."
+    ),
 });
 const listPlaylistsOutputSchema = z.object({
   playlists: z.array(playlistSchema),
@@ -58,7 +67,7 @@ const createPlaylistInputSchema = z.object({
   folderId: persistentIdSchema
     .optional()
     .describe(
-      "Persistent folder ID from music.list_folders or music.create_folder. Omit to create at the top level.",
+      "Persistent folder ID from music.list_folders or music.create_folder. Omit to create at the top level."
     ),
 });
 const createPlaylistOutputSchema = z.object({
@@ -69,10 +78,10 @@ const createPlaylistFromCriteriaInputSchema = z.object({
   folderId: persistentIdSchema
     .optional()
     .describe(
-      "Persistent folder ID from music.list_folders or music.create_folder. Omit to create at the top level.",
+      "Persistent folder ID from music.list_folders or music.create_folder. Omit to create at the top level."
     ),
   criteria: trackCriteriaSchema.describe(
-    "Track filters, with the same rules as music.find_tracks. At least one filter is required.",
+    "Track filters, with the same rules as music.find_tracks. At least one filter is required."
   ),
 });
 const createPlaylistFromCriteriaOutputSchema = z.object({
@@ -80,19 +89,29 @@ const createPlaylistFromCriteriaOutputSchema = z.object({
   matched: z
     .number()
     .describe(
-      "Number of scanned tracks that matched. When truncated is true, this is a lower bound within the scanned window, not a full-library total.",
+      "Number of scanned tracks that matched. When truncated is true, this is a lower bound within the scanned window, not a full-library total."
     ),
   requested: z
     .number()
-    .describe("Number of matched tracks the server tried to add, at most criteria.limit."),
-  added: z.number().describe("Number of tracks added. Equals addedTrackIds.length."),
-  addedTrackIds: z.array(z.string()).describe("Persistent IDs of tracks added to the playlist."),
+    .describe(
+      "Number of matched tracks the server tried to add, at most criteria.limit."
+    ),
+  added: z
+    .number()
+    .describe("Number of tracks added. Equals addedTrackIds.length."),
+  addedTrackIds: z
+    .array(z.string())
+    .describe("Persistent IDs of tracks added to the playlist."),
   missingTrackIds: z
     .array(z.string())
-    .describe("IDs that were not found in the library when the server tried to add them."),
+    .describe(
+      "IDs that were not found in the library when the server tried to add them."
+    ),
   failedTrackIds: z
     .array(z.string())
-    .describe("IDs that were found in the library but could not be added to the playlist."),
+    .describe(
+      "IDs that were found in the library but could not be added to the playlist."
+    ),
   scanned: scannedOutputSchema,
   truncated: truncatedOutputSchema,
 });
@@ -101,7 +120,8 @@ export function createPlaylistOperations(execFn?: ExecFn) {
   return {
     listPlaylists: (input: { folderId?: string; includeRoot?: boolean }) =>
       listPlaylists(input, execFn),
-    createPlaylist: (input: { name: string; folderId?: string }) => createPlaylist(input, execFn),
+    createPlaylist: (input: { name: string; folderId?: string }) =>
+      createPlaylist(input, execFn),
   };
 }
 
@@ -122,7 +142,10 @@ export const listPlaylistsTool = defineTool({
     const playlists = await playlistOperations.listPlaylists(input);
     return {
       structuredContent: { playlists },
-      logData: { playlistCount: playlists.length, hasFolderFilter: Boolean(folderId) },
+      logData: {
+        playlistCount: playlists.length,
+        hasFolderFilter: Boolean(folderId),
+      },
     };
   },
 });
@@ -168,7 +191,7 @@ export function createCriteriaPlaylistTool(
     findTracks,
     createPlaylist: playlistOperations.createPlaylist,
     addTracksToPlaylist,
-  },
+  }
 ) {
   return defineTool({
     name: "music.create_playlist_from_criteria",
@@ -217,7 +240,7 @@ export function createCriteriaPlaylistTool(
               }
             : await operations.addTracksToPlaylist(
                 playlist.id,
-                tracks.tracks.map((track) => track.id),
+                tracks.tracks.map((track) => track.id)
               );
         return { playlist, addResult };
       });
@@ -256,25 +279,28 @@ export const createPlaylistFromCriteriaTool = createCriteriaPlaylistTool();
 
 async function listPlaylists(
   input: { folderId?: string; includeRoot?: boolean },
-  execFn: ExecFn | undefined,
+  execFn: ExecFn | undefined
 ): Promise<Playlist[]> {
-  const playlists = (await readPlaylistEntries(execFn)).filter((entry) => entry.kind === "user");
+  const playlists = (await readPlaylistEntries(execFn)).filter(
+    (entry) => entry.kind === "user"
+  );
   const parentIds = await readParentIds(
     playlists.map((playlist) => playlist.id),
-    execFn,
+    execFn
   );
   const includeRoot = input.includeRoot ?? true;
   return playlists.flatMap(({ id, name, isSmart }) => {
     const folderId = parentIds.get(id) ?? "";
     if (input.folderId !== undefined && folderId !== input.folderId) return [];
-    if (input.folderId === undefined && !includeRoot && folderId === "") return [];
+    if (input.folderId === undefined && !includeRoot && folderId === "")
+      return [];
     return [{ id, name, isSmart, ...(folderId !== "" ? { folderId } : {}) }];
   });
 }
 
 async function createPlaylist(
   input: { name: string; folderId?: string },
-  execFn: ExecFn | undefined,
+  execFn: ExecFn | undefined
 ): Promise<Playlist> {
   const safeName = escapeAppleScriptString(input.name);
   const safeFolderId = escapeAppleScriptString(input.folderId ?? "");
@@ -311,7 +337,7 @@ end jsonPlaylist`;
   const parsed = parseAppleScriptJson(
     result.stdout,
     playlistRowSchema,
-    "Music returned an invalid create playlist payload.",
+    "Music returned an invalid create playlist payload."
   );
 
   const output: Playlist = {

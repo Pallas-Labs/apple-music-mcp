@@ -1,9 +1,14 @@
 import * as z from "zod/v4";
+
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
 import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
-import { defineTool, READ_ONLY_ANNOTATIONS, type ToolSchemaOutput } from "../tool-contracts.js";
+import {
+  defineTool,
+  READ_ONLY_ANNOTATIONS,
+  type ToolSchemaOutput,
+} from "../tool-contracts.js";
 import { durationOutputSchema, trackIdOutputSchema } from "./tracks.js";
 
 const searchLibraryInputSchema = z.object({
@@ -12,8 +17,16 @@ const searchLibraryInputSchema = z.object({
     .trim()
     .min(1)
     .max(255)
-    .describe("Search text, 1-255 characters. Uses the Music app's library search."),
-  limit: z.number().int().min(1).max(50).optional().describe("Maximum results, 1-50 (default 50)."),
+    .describe(
+      "Search text, 1-255 characters. Uses the Music app's library search."
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .describe("Maximum results, 1-50 (default 50)."),
 });
 const searchLibraryOutputSchema = z.object({
   tracks: z.array(
@@ -23,7 +36,7 @@ const searchLibraryOutputSchema = z.object({
       artist: z.string(),
       album: z.string(),
       duration: durationOutputSchema,
-    }),
+    })
   ),
 });
 
@@ -37,16 +50,21 @@ export const searchLibraryTool = defineTool({
   writesRequired: false,
   async handler({ query, limit }) {
     const tracks = await searchOperations.searchLibrary(query, limit ?? 50);
-    return { structuredContent: { tracks }, logData: { query, resultCount: tracks.length } };
+    return {
+      structuredContent: { tracks },
+      logData: { query, resultCount: tracks.length },
+    };
   },
 });
 
-type SearchResult = ToolSchemaOutput<typeof searchLibraryOutputSchema>["tracks"];
+type SearchResult = ToolSchemaOutput<
+  typeof searchLibraryOutputSchema
+>["tracks"];
 
 async function searchLibrary(
   query: string,
   limit: number,
-  execFn: ExecFn | undefined,
+  execFn: ExecFn | undefined
 ): Promise<SearchResult> {
   const safeQuery = escapeAppleScriptString(query);
   const body = `
@@ -97,13 +115,14 @@ end jsonTracks`;
   return parseAppleScriptJson(
     result.stdout,
     searchLibraryOutputSchema.shape.tracks,
-    "Music returned an invalid search payload.",
+    "Music returned an invalid search payload."
   );
 }
 
 export function createSearchOperations(execFn?: ExecFn) {
   return {
-    searchLibrary: (query: string, limit: number) => searchLibrary(query, limit, execFn),
+    searchLibrary: (query: string, limit: number) =>
+      searchLibrary(query, limit, execFn),
   };
 }
 

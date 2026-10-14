@@ -12,12 +12,7 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "declaration": true,
-    "types": [
-      "node",
-      "bun"
-    ]
+    "types": ["node", "bun"]
   },
-  "include": [
-    "src/**/*.ts"
-  ]
+  "include": ["src/**/*.ts"]
 }

@@ -10,7 +10,11 @@ export class MusicToolError extends Error {
   readonly code: MusicToolErrorCode;
   readonly details: Record<string, unknown> | undefined;
 
-  constructor(code: MusicToolErrorCode, message: string, details?: Record<string, unknown>) {
+  constructor(
+    code: MusicToolErrorCode,
+    message: string,
+    details?: Record<string, unknown>
+  ) {
     super(message);
     this.name = "MusicToolError";
     this.code = code;

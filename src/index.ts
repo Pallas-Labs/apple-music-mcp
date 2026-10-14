@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+
 import { SERVER_NAME, SERVER_VERSION } from "./config.js";
 import { serveHttp } from "./http.js";
 import { log } from "./logger.js";
@@ -13,7 +14,9 @@ if (httpPort && !/^\d{1,5}$/.test(httpPort)) {
   });
   process.exit(1);
 }
-const handle = httpPort ? serveHttp(Number(httpPort)) : serveStdio(() => createServer());
+const handle = httpPort
+  ? serveHttp(Number(httpPort))
+  : serveStdio(() => createServer());
 log("server_started", {
   name: SERVER_NAME,
   version: SERVER_VERSION,
@@ -28,9 +31,11 @@ function shutdown(): void {
   void handle.close().then(
     () => process.exit(0),
     (error: unknown) => {
-      log("server_fatal", { message: error instanceof Error ? error.message : String(error) });
+      log("server_fatal", {
+        message: error instanceof Error ? error.message : String(error),
+      });
       process.exit(1);
-    },
+    }
   );
   setTimeout(() => process.exit(1), 5_000).unref();
 }

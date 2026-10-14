@@ -1,18 +1,19 @@
 import * as z from "zod/v4";
-import { persistentIdSchema } from "../config.js";
+
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
 import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript } from "../applescript/templates.js";
+import { persistentIdSchema } from "../config.js";
 import { defineTool, IDEMPOTENT_WRITE_ANNOTATIONS } from "../tool-contracts.js";
 import { playlistRowSchema, type Playlist } from "./playlists.js";
 
 const movePlaylistInputSchema = z.object({
   playlistId: persistentIdSchema.describe(
-    "Persistent playlist ID from music.list_playlists or music.create_playlist.",
+    "Persistent playlist ID from music.list_playlists or music.create_playlist."
   ),
   targetFolderId: persistentIdSchema.describe(
-    "Persistent folder ID from music.list_folders or music.create_folder.",
+    "Persistent folder ID from music.list_folders or music.create_folder."
   ),
 });
 const movePlaylistOutputSchema = z.object({
@@ -23,14 +24,20 @@ const movePlaylistOutputSchema = z.object({
       .string()
       .optional()
       .describe("Persistent ID of the folder now holding the playlist."),
-    isSmart: z.boolean().describe("True for smart playlists and built-in special playlists."),
-    trackCount: z.number().optional().describe("Number of tracks in the playlist."),
+    isSmart: z
+      .boolean()
+      .describe("True for smart playlists and built-in special playlists."),
+    trackCount: z
+      .number()
+      .optional()
+      .describe("Number of tracks in the playlist."),
   }),
 });
 
 export const movePlaylistTool = defineTool({
   name: "music.move_playlist",
-  description: "Move a user playlist into a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
+  description:
+    "Move a user playlist into a folder. Requires APPLE_MUSIC_MCP_ENABLE_WRITES=true.",
   inputSchema: movePlaylistInputSchema,
   outputSchema: movePlaylistOutputSchema,
   annotations: IDEMPOTENT_WRITE_ANNOTATIONS,
@@ -47,7 +54,10 @@ export const movePlaylistTool = defineTool({
     };
   },
   async handler({ playlistId, targetFolderId }) {
-    const playlist = await moveOperations.movePlaylist({ playlistId, targetFolderId });
+    const playlist = await moveOperations.movePlaylist({
+      playlistId,
+      targetFolderId,
+    });
     return {
       structuredContent: { playlist },
       logData: { playlistId, targetFolderId },
@@ -57,7 +67,7 @@ export const movePlaylistTool = defineTool({
 
 async function movePlaylist(
   input: { playlistId: string; targetFolderId: string },
-  execFn: ExecFn | undefined,
+  execFn: ExecFn | undefined
 ): Promise<Playlist> {
   const safePlaylistId = escapeAppleScriptString(input.playlistId);
   const safeFolderId = escapeAppleScriptString(input.targetFolderId);
@@ -103,7 +113,7 @@ end jsonPlaylist`;
   const parsed = parseAppleScriptJson(
     result.stdout,
     playlistRowSchema,
-    "Music returned an invalid move playlist payload.",
+    "Music returned an invalid move playlist payload."
   );
   const folderId = parsed.folderId.trim();
   return {

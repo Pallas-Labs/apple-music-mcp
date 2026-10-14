@@ -4,6 +4,6 @@ export function log(event: string, data: Record<string, unknown>): void {
       ts: new Date().toISOString(),
       event,
       ...data,
-    }),
+    })
   );
 }

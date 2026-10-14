@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { MusicToolError } from "../types.js";
 import {
   buildUpdateTrackScript,
@@ -13,15 +14,23 @@ describe("music.update_track input", () => {
   test("requires a change and rejects contradictory or out-of-range values", () => {
     const schema = updateTrackTool.inputSchema;
     expect(schema.safeParse({ trackId: TRACK_ID }).success).toBe(false);
-    expect(schema.safeParse({ trackId: TRACK_ID, favorited: true, disliked: true }).success).toBe(
-      false,
+    expect(
+      schema.safeParse({ trackId: TRACK_ID, favorited: true, disliked: true })
+        .success
+    ).toBe(false);
+    expect(schema.safeParse({ trackId: TRACK_ID, rating: 6 }).success).toBe(
+      false
     );
-    expect(schema.safeParse({ trackId: TRACK_ID, rating: 6 }).success).toBe(false);
-    expect(schema.safeParse({ trackId: TRACK_ID, rating: 2.5 }).success).toBe(false);
-    expect(schema.safeParse({ trackId: TRACK_ID, rating: 0 }).success).toBe(true);
-    expect(schema.safeParse({ trackId: TRACK_ID, favorited: true, disliked: false }).success).toBe(
-      true,
+    expect(schema.safeParse({ trackId: TRACK_ID, rating: 2.5 }).success).toBe(
+      false
     );
+    expect(schema.safeParse({ trackId: TRACK_ID, rating: 0 }).success).toBe(
+      true
+    );
+    expect(
+      schema.safeParse({ trackId: TRACK_ID, favorited: true, disliked: false })
+        .success
+    ).toBe(true);
   });
 });
 
@@ -38,7 +47,9 @@ describe("planTrackWrites", () => {
   });
 
   test("leaves the other flag alone when one is cleared, and maps stars to 0-100", () => {
-    expect(planTrackWrites({ trackId: TRACK_ID, favorited: false, rating: 4 })).toEqual({
+    expect(
+      planTrackWrites({ trackId: TRACK_ID, favorited: false, rating: 4 })
+    ).toEqual({
       favorited: false,
       rating: 80,
     });
@@ -73,12 +84,14 @@ describe("createLibraryOperations.updateTrack", () => {
       stdout: '{"found":true,"favorited":true,"disliked":false,"rating":70}',
       stderr: "",
     }));
-    expect(await operations.updateTrack(TRACK_ID, { favorited: true })).toEqual({
-      trackId: TRACK_ID,
-      favorited: true,
-      disliked: false,
-      rating: 4,
-    });
+    expect(await operations.updateTrack(TRACK_ID, { favorited: true })).toEqual(
+      {
+        trackId: TRACK_ID,
+        favorited: true,
+        disliked: false,
+        rating: 4,
+      }
+    );
   });
 
   test("maps an unknown track ID to not_found", async () => {

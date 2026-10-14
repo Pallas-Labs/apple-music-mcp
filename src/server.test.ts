@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import * as z from "zod/v4";
+
 import {
   Client,
   InMemoryTransport,
@@ -8,12 +8,20 @@ import {
   type ElicitRequestFormParams,
   type ElicitResult,
 } from "@modelcontextprotocol/client";
-import { createMcpHandler, inputRequired, inputResponse } from "@modelcontextprotocol/server";
+import {
+  createMcpHandler,
+  inputRequired,
+  inputResponse,
+} from "@modelcontextprotocol/server";
+import * as z from "zod/v4";
+
 import { runtimeConfig } from "./config.js";
-import { createServer, defineTool, toolErrorResult, type CreateServerOptions } from "./server.js";
-import { createDeletePlaylistTool, createPlaylistEditOperations } from "./tools/playlist-edits.js";
-import { createCriteriaPlaylistTool } from "./tools/playlists.js";
-import { MusicToolError } from "./types.js";
+import {
+  createServer,
+  defineTool,
+  toolErrorResult,
+  type CreateServerOptions,
+} from "./server.js";
 import {
   addTracksToPlaylistTool,
   capabilitiesTool,
@@ -29,6 +37,12 @@ import {
   removeTracksFromPlaylistTool,
   updateTrackTool,
 } from "./tools/index.js";
+import {
+  createDeletePlaylistTool,
+  createPlaylistEditOperations,
+} from "./tools/playlist-edits.js";
+import { createCriteriaPlaylistTool } from "./tools/playlists.js";
+import { MusicToolError } from "./types.js";
 
 const READ_ANNOTATIONS = {
   readOnlyHint: true,
@@ -91,24 +105,28 @@ type Era = (typeof ERAS)[number];
 async function withClient<T>(
   era: Era,
   run: (client: Client) => Promise<T>,
-  options: TestClientOptions = {},
+  options: TestClientOptions = {}
 ): Promise<T> {
   const { elicit } = options;
   const clientOptions: ClientOptions = {
     ...(era === "2026-07-28" ? { versionNegotiation: { mode: "auto" } } : {}),
     ...(elicit ? { capabilities: { elicitation: {} } } : {}),
   };
-  const client = new Client({ name: "apple-music-mcp-test", version: "1.0.0" }, clientOptions);
+  const client = new Client(
+    { name: "apple-music-mcp-test", version: "1.0.0" },
+    clientOptions
+  );
   if (elicit) {
     client.setRequestHandler("elicitation/create", (request) =>
-      elicit(request.params as ElicitRequestFormParams),
+      elicit(request.params as ElicitRequestFormParams)
     );
   }
 
   let closeServer: () => Promise<void>;
   if (era === "2025-era") {
     const server = createServer(options.server);
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
     await client.connect(clientTransport);
     closeServer = () => server.close();
@@ -117,7 +135,7 @@ async function withClient<T>(
     await client.connect(
       new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
         fetch: (url, init) => handler.fetch(new Request(url, init)),
-      }),
+      })
     );
     closeServer = () => handler.close();
   }
@@ -141,7 +159,8 @@ const askTool = defineTool({
   writesRequired: true,
   dryRunResult: () => ({ canElicit: false, answer: "dry run" }),
   async handler(_input, { canElicit, inputResponses }) {
-    if (!canElicit) return { structuredContent: { canElicit, answer: "not asked" } };
+    if (!canElicit)
+      return { structuredContent: { canElicit, answer: "not asked" } };
     const response = inputResponse(inputResponses, "go");
     if (response.kind === "missing") {
       return inputRequired({
@@ -154,7 +173,10 @@ const askTool = defineTool({
       });
     }
     return {
-      structuredContent: { canElicit, answer: response.kind === "elicit" ? response.action : "" },
+      structuredContent: {
+        canElicit,
+        answer: response.kind === "elicit" ? response.action : "",
+      },
     };
   },
 });
@@ -163,12 +185,14 @@ describe("createServer", () => {
   test("registers all tools with schemas and exact annotations", async () => {
     await withClient("2025-era", async (client) => {
       const response = await client.listTools();
-      expect(response.tools.map((tool) => tool.name)).toEqual(Object.keys(EXPECTED_ANNOTATIONS));
+      expect(response.tools.map((tool) => tool.name)).toEqual(
+        Object.keys(EXPECTED_ANNOTATIONS)
+      );
       for (const tool of response.tools) {
         expect(tool.inputSchema).toBeDefined();
         expect(tool.outputSchema).toBeDefined();
         expect(tool.annotations).toEqual(
-          EXPECTED_ANNOTATIONS[tool.name as keyof typeof EXPECTED_ANNOTATIONS],
+          EXPECTED_ANNOTATIONS[tool.name as keyof typeof EXPECTED_ANNOTATIONS]
         );
       }
     });
@@ -176,9 +200,14 @@ describe("createServer", () => {
 
   test("music.capabilities lists every registered tool in order", async () => {
     await withClient("2025-era", async (client) => {
-      const response = await client.callTool({ name: "music.capabilities", arguments: {} });
+      const response = await client.callTool({
+        name: "music.capabilities",
+        arguments: {},
+      });
       expect(response.isError).toBeFalsy();
-      expect(response.structuredContent?.tools).toEqual(Object.keys(EXPECTED_ANNOTATIONS));
+      expect(response.structuredContent?.tools).toEqual(
+        Object.keys(EXPECTED_ANNOTATIONS)
+      );
     });
   });
 
@@ -186,8 +215,9 @@ describe("createServer", () => {
     const config = { writesEnabled: true, dryRun: true };
     const response = await withClient(
       "2025-era",
-      (client) => client.callTool({ name: "music.capabilities", arguments: {} }),
-      { server: { config, tools: [askTool, capabilitiesTool] } },
+      (client) =>
+        client.callTool({ name: "music.capabilities", arguments: {} }),
+      { server: { config, tools: [askTool, capabilitiesTool] } }
     );
     expect(response.structuredContent).toMatchObject({
       writesEnabled: true,
@@ -207,14 +237,15 @@ describe("createServer", () => {
         expect(response.isError).toBe(true);
         const content = response.content[0];
         expect(content?.type).toBe("text");
-        if (!content || content.type !== "text") throw new Error("Expected text error content.");
+        if (!content || content.type !== "text")
+          throw new Error("Expected text error content.");
         expect(JSON.parse(content.text)).toEqual({
           code: "validation_error",
           message:
             "Writes are disabled. Set APPLE_MUSIC_MCP_ENABLE_WRITES=true to enable mutation tools.",
         });
       });
-    },
+    }
   );
 
   test("serves the 2026-07-28 protocol with tools, resources, and prompts", async () => {
@@ -227,7 +258,9 @@ describe("createServer", () => {
         client.listPrompts(),
       ]);
 
-      expect(tools.tools).toHaveLength(Object.keys(EXPECTED_ANNOTATIONS).length);
+      expect(tools.tools).toHaveLength(
+        Object.keys(EXPECTED_ANNOTATIONS).length
+      );
       expect(tools.tools.every((tool) => Boolean(tool.title))).toBe(true);
       expect(resources.resources.map((resource) => resource.uri)).toEqual([
         "music://guide",
@@ -315,18 +348,24 @@ describe("createServer", () => {
             messages.push(params.message);
             return { action: "decline" };
           },
-        },
+        }
       );
       expect(answered.isError).toBeFalsy();
-      expect(answered.structuredContent).toEqual({ canElicit: true, answer: "decline" });
+      expect(answered.structuredContent).toEqual({
+        canElicit: true,
+        answer: "decline",
+      });
       expect(messages).toEqual(["Go?"]);
 
       const unasked = await withClient(
         era,
         (client) => client.callTool({ name: "test.ask", arguments: {} }),
-        { server: { config: WRITES_ENABLED, tools: [askTool] } },
+        { server: { config: WRITES_ENABLED, tools: [askTool] } }
       );
-      expect(unasked.structuredContent).toEqual({ canElicit: false, answer: "not asked" });
+      expect(unasked.structuredContent).toEqual({
+        canElicit: false,
+        answer: "not asked",
+      });
     }
   });
 
@@ -361,7 +400,9 @@ describe("createServer", () => {
         outputSchema: renamePlaylistTool.outputSchema,
       },
       {
-        payload: deletePlaylistTool.dryRunResult({ playlistId: "ABCDEF1234567890" }),
+        payload: deletePlaylistTool.dryRunResult({
+          playlistId: "ABCDEF1234567890",
+        }),
         outputSchema: deletePlaylistTool.outputSchema,
       },
       {
@@ -369,7 +410,10 @@ describe("createServer", () => {
         outputSchema: playbackControlTool.outputSchema,
       },
       {
-        payload: playTool.dryRunResult({ playlistId: "ABCDEF1234567890", shuffle: true }),
+        payload: playTool.dryRunResult({
+          playlistId: "ABCDEF1234567890",
+          shuffle: true,
+        }),
         outputSchema: playTool.outputSchema,
       },
       {
@@ -404,7 +448,10 @@ describe("createServer", () => {
         outputSchema: createPlaylistFromCriteriaTool.outputSchema,
       },
       {
-        payload: updateTrackTool.dryRunResult({ trackId: "AAAABBBBCCCCDDDD", disliked: true }),
+        payload: updateTrackTool.dryRunResult({
+          trackId: "AAAABBBBCCCCDDDD",
+          disliked: true,
+        }),
         outputSchema: updateTrackTool.outputSchema,
       },
     ];
@@ -443,7 +490,10 @@ describe("mutation lock scope", () => {
     return { tool, started: started.promise, release: () => gate.resolve() };
   }
 
-  function criteriaTool(events: string[], scanGate: Promise<void> = Promise.resolve()) {
+  function criteriaTool(
+    events: string[],
+    scanGate: Promise<void> = Promise.resolve()
+  ) {
     const scanStarted = Promise.withResolvers<void>();
     const tool = createCriteriaPlaylistTool({
       async findTracks() {
@@ -505,9 +555,16 @@ describe("mutation lock scope", () => {
         });
         await criteria.scanStarted;
 
-        const write = await client.callTool({ name: "test.write", arguments: {} });
+        const write = await client.callTool({
+          name: "test.write",
+          arguments: {},
+        });
         expect(write.structuredContent).toEqual({ ok: true });
-        expect(events).toEqual(["scan start", "other write start", "other write end"]);
+        expect(events).toEqual([
+          "scan start",
+          "other write start",
+          "other write end",
+        ]);
 
         scanGate.resolve();
         const created = await pending;
@@ -517,7 +574,7 @@ describe("mutation lock scope", () => {
           addedTrackIds: [TRACK_ID],
         });
       },
-      { server: { config: WRITES_ENABLED, tools: [criteria.tool, other.tool] } },
+      { server: { config: WRITES_ENABLED, tools: [criteria.tool, other.tool] } }
     );
     expect(events.slice(3)).toEqual(["scan end", "create", "add"]);
   });
@@ -543,7 +600,7 @@ describe("mutation lock scope", () => {
         other.release();
         await Promise.all([write, created]);
       },
-      { server: { config: WRITES_ENABLED, tools: [criteria.tool, other.tool] } },
+      { server: { config: WRITES_ENABLED, tools: [criteria.tool, other.tool] } }
     );
     expect(events.slice(3)).toEqual(["other write end", "create", "add"]);
   });
@@ -552,7 +609,10 @@ describe("mutation lock scope", () => {
 describe("music.delete_playlist confirmation", () => {
   const PLAYLIST_ID = "ABCDEF1234567890";
 
-  function deleteServer(kind: "user" | "folder" = "user", config = WRITES_ENABLED) {
+  function deleteServer(
+    kind: "user" | "folder" = "user",
+    config = WRITES_ENABLED
+  ) {
     const deletedIds: string[] = [];
     const operations = createPlaylistEditOperations(async (script) => {
       const deleting = script.includes("delete p");
@@ -571,7 +631,10 @@ describe("music.delete_playlist confirmation", () => {
         stderr: "",
       };
     });
-    return { deletedIds, server: { config, tools: [createDeletePlaylistTool(operations)] } };
+    return {
+      deletedIds,
+      server: { config, tools: [createDeletePlaylistTool(operations)] },
+    };
   }
 
   function callDelete(client: Client, args: Record<string, unknown> = {}) {
@@ -584,7 +647,8 @@ describe("music.delete_playlist confirmation", () => {
   function errorPayload(response: Awaited<ReturnType<typeof callDelete>>) {
     expect(response.isError).toBe(true);
     const content = response.content[0];
-    if (!content || content.type !== "text") throw new Error("Expected text error content.");
+    if (!content || content.type !== "text")
+      throw new Error("Expected text error content.");
     return JSON.parse(content.text) as { code: string; message: string };
   }
 
@@ -593,13 +657,17 @@ describe("music.delete_playlist confirmation", () => {
       const { deletedIds, server } = deleteServer();
       const prompts: string[] = [];
       // confirm: true must not skip the prompt when the client can show one.
-      const accepted = await withClient(era, (client) => callDelete(client, { confirm: true }), {
-        server,
-        elicit: (params) => {
-          prompts.push(params.message);
-          return { action: "accept", content: { confirm: true } };
-        },
-      });
+      const accepted = await withClient(
+        era,
+        (client) => callDelete(client, { confirm: true }),
+        {
+          server,
+          elicit: (params) => {
+            prompts.push(params.message);
+            return { action: "accept", content: { confirm: true } };
+          },
+        }
+      );
       expect(accepted.isError).toBeFalsy();
       expect(accepted.structuredContent).toEqual({
         deletedPlaylistId: PLAYLIST_ID,
@@ -641,9 +709,13 @@ describe("music.delete_playlist confirmation", () => {
       expect(unconfirmed.deletedIds).toEqual([]);
 
       const confirmed = deleteServer();
-      const deleted = await withClient(era, (client) => callDelete(client, { confirm: true }), {
-        server: confirmed.server,
-      });
+      const deleted = await withClient(
+        era,
+        (client) => callDelete(client, { confirm: true }),
+        {
+          server: confirmed.server,
+        }
+      );
       expect(deleted.structuredContent).toEqual({
         deletedPlaylistId: PLAYLIST_ID,
         name: "Road Trip",
@@ -664,7 +736,7 @@ describe("music.delete_playlist confirmation", () => {
           prompts.push(params.message);
           return { action: "accept", content: { confirm: true } };
         },
-      },
+      }
     );
     const error = errorPayload(response);
     expect(error.code).toBe("validation_error");
@@ -674,15 +746,22 @@ describe("music.delete_playlist confirmation", () => {
   });
 
   test("dry run returns the preview without prompting or deleting", async () => {
-    const { deletedIds, server } = deleteServer("user", { writesEnabled: true, dryRun: true });
-    const prompts: string[] = [];
-    const response = await withClient("2025-era", (client) => callDelete(client), {
-      server,
-      elicit: (params) => {
-        prompts.push(params.message);
-        return { action: "accept", content: { confirm: true } };
-      },
+    const { deletedIds, server } = deleteServer("user", {
+      writesEnabled: true,
+      dryRun: true,
     });
+    const prompts: string[] = [];
+    const response = await withClient(
+      "2025-era",
+      (client) => callDelete(client),
+      {
+        server,
+        elicit: (params) => {
+          prompts.push(params.message);
+          return { action: "accept", content: { confirm: true } };
+        },
+      }
+    );
     expect(response.structuredContent).toEqual({
       deletedPlaylistId: PLAYLIST_ID,
       name: "DRY_RUN_PLAYLIST",
@@ -708,9 +787,11 @@ function undescribedProperties(schema: JsonSchemaNode, path: string): string[] {
       ...undescribedProperties(property, `${path}.${name}`),
     ]),
     ...(schema.items ? undescribedProperties(schema.items, `${path}[]`) : []),
-    ...[...(schema.anyOf ?? []), ...(schema.oneOf ?? []), ...(schema.allOf ?? [])].flatMap(
-      (variant) => undescribedProperties(variant, path),
-    ),
+    ...[
+      ...(schema.anyOf ?? []),
+      ...(schema.oneOf ?? []),
+      ...(schema.allOf ?? []),
+    ].flatMap((variant) => undescribedProperties(variant, path)),
   ];
   return nested;
 }
@@ -722,7 +803,7 @@ describe("tool metadata for code-mode clients", () => {
     await withClient("2025-era", async (client) => {
       const { tools } = await client.listTools();
       const missing = tools.flatMap((tool) =>
-        undescribedProperties(tool.inputSchema as JsonSchemaNode, tool.name),
+        undescribedProperties(tool.inputSchema as JsonSchemaNode, tool.name)
       );
       expect(missing).toEqual([]);
     });
@@ -732,8 +813,13 @@ describe("tool metadata for code-mode clients", () => {
     await withClient("2025-era", async (client) => {
       const { tools } = await client.listTools();
       const tooLong = tools
-        .map((tool) => ({ name: tool.name, summary: tool.description?.split("\n")[0] ?? "" }))
-        .filter(({ summary }) => summary.trim().length === 0 || summary.length > 120);
+        .map((tool) => ({
+          name: tool.name,
+          summary: tool.description?.split("\n")[0] ?? "",
+        }))
+        .filter(
+          ({ summary }) => summary.trim().length === 0 || summary.length > 120
+        );
       expect(tooLong).toEqual([]);
     });
   });
@@ -742,7 +828,9 @@ describe("tool metadata for code-mode clients", () => {
 describe("toolErrorResult", () => {
   test("omits internal details from known errors", () => {
     const result = toolErrorResult(
-      new MusicToolError("script_error", "Public message", { sentinelDetails: "SECRET_DETAILS" }),
+      new MusicToolError("script_error", "Public message", {
+        sentinelDetails: "SECRET_DETAILS",
+      })
     );
     expect(JSON.parse(result.content[0].text)).toEqual({
       code: "script_error",

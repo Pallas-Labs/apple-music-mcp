@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+
+import {
+  Client,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import { createMcpHandler } from "@modelcontextprotocol/server";
+
 import { runAppleScript } from "./applescript/runner.js";
 import { createServer } from "./server.js";
 
@@ -37,15 +42,17 @@ end tell`;
     const handler = createMcpHandler(() => createServer());
     const client = new Client(
       { name: "apple-music-mcp-integration", version: "1.0.0" },
-      { versionNegotiation: { mode: "auto" } },
+      { versionNegotiation: { mode: "auto" } }
     );
     await client.connect(
       new StreamableHTTPClientTransport(new URL("http://test.local/mcp"), {
         fetch: (url, init) => handler.fetch(new Request(url, init)),
-      }),
+      })
     );
     try {
-      const nowPlaying = await client.readResource({ uri: "music://now-playing" });
+      const nowPlaying = await client.readResource({
+        uri: "music://now-playing",
+      });
       expect(nowPlaying).toMatchObject({ ttlMs: 0, cacheScope: "private" });
     } finally {
       await client.close();

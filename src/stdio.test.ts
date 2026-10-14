@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { Client, type ClientOptions, type ProtocolEra } from "@modelcontextprotocol/client";
+
+import {
+  Client,
+  type ClientOptions,
+  type ProtocolEra,
+} from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+
 import { allTools } from "./tools/index.js";
 
 const ENTRYPOINT = fileURLToPath(new URL("./index.ts", import.meta.url));
@@ -13,7 +19,11 @@ const PROTOCOL_CONFIGS: Array<{
   era: ProtocolEra;
 }> = [
   { protocol: "legacy", options: {}, era: "legacy" },
-  { protocol: "auto", options: { versionNegotiation: { mode: "auto" } }, era: "modern" },
+  {
+    protocol: "auto",
+    options: { versionNegotiation: { mode: "auto" } },
+    era: "modern",
+  },
   {
     protocol: "2026-07-28",
     options: { versionNegotiation: { mode: { pin: "2026-07-28" } } },
@@ -29,7 +39,10 @@ describe("stdio entrypoint", () => {
         args: [ENTRYPOINT],
         stderr: "ignore",
       });
-      const client = new Client({ name: "apple-music-mcp-stdio-test", version: "1.0.0" }, options);
+      const client = new Client(
+        { name: "apple-music-mcp-stdio-test", version: "1.0.0" },
+        options
+      );
       try {
         const startedAt = performance.now();
         await client.connect(transport);
@@ -38,7 +51,9 @@ describe("stdio entrypoint", () => {
         expect(connectMs).toBeLessThan(5_000);
 
         const { tools } = await client.listTools();
-        expect(tools.map((tool) => tool.name)).toEqual(allTools.map((tool) => tool.name));
+        expect(tools.map((tool) => tool.name)).toEqual(
+          allTools.map((tool) => tool.name)
+        );
       } finally {
         await client.close();
       }

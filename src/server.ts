@@ -3,16 +3,30 @@ import {
   isInputRequiredResult,
   McpServer,
 } from "@modelcontextprotocol/server";
-import type { ClientCapabilities, ServerContext, ToolCallback } from "@modelcontextprotocol/server";
+import type {
+  ClientCapabilities,
+  ServerContext,
+  ToolCallback,
+} from "@modelcontextprotocol/server";
+
 import type { AnyToolDef, ToolContext, ToolSchema } from "./tool-contracts.js";
 export { defineTool } from "./tool-contracts.js";
 export type { ToolContext, ToolDef, ToolResult } from "./tool-contracts.js";
-import { SERVER_NAME, SERVER_VERSION, runtimeConfig, type RuntimeConfig } from "./config.js";
-import { MusicToolError } from "./types.js";
+import {
+  SERVER_NAME,
+  SERVER_VERSION,
+  runtimeConfig,
+  type RuntimeConfig,
+} from "./config.js";
 import { log } from "./logger.js";
+import {
+  registerPrompts,
+  registerResources,
+  STATIC_CATALOGUE_CACHE_HINT,
+} from "./mcp-features.js";
 import { withMutationLock } from "./mutation-lock.js";
-import { registerPrompts, registerResources, STATIC_CATALOGUE_CACHE_HINT } from "./mcp-features.js";
 import { allTools } from "./tools/index.js";
+import { MusicToolError } from "./types.js";
 
 // The largest valid input is 100 track IDs, so 512 leaves headroom and rejects floods early.
 const MAX_TOOL_INPUT_ELEMENTS = 512;
@@ -36,7 +50,10 @@ export function toolErrorResult(error: unknown): {
   const payload =
     error instanceof MusicToolError
       ? { code: error.code, message: error.message }
-      : { code: "script_error", message: "An unexpected server error occurred." };
+      : {
+          code: "script_error",
+          message: "An unexpected server error occurred.",
+        };
 
   return {
     isError: true,
@@ -78,10 +95,13 @@ export function createServer({
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
       instructions:
         "Call music.health first. Read tools never change Music. Write tools need APPLE_MUSIC_MCP_ENABLE_WRITES=true. Each result is structuredContent that matches the tool's outputSchema. Errors set isError; server errors carry JSON text {code,message}. Pass persistent IDs from read results to later tools. If your client runs tools from code, chain read calls in one script. Bulk writes are not atomic, so check the returned ID lists. See music://guide.",
-    },
+    }
   );
 
-  const serverInfo: ServerInfo = { config, toolNames: tools.map((tool) => tool.name) };
+  const serverInfo: ServerInfo = {
+    config,
+    toolNames: tools.map((tool) => tool.name),
+  };
   for (const tool of tools) registerTool(server, tool, serverInfo);
   registerResources(server);
   registerPrompts(server);
@@ -89,19 +109,29 @@ export function createServer({
   return server;
 }
 
-function clientCapabilities(server: McpServer, ctx: ServerContext): ClientCapabilities | undefined {
+function clientCapabilities(
+  server: McpServer,
+  ctx: ServerContext
+): ClientCapabilities | undefined {
   // 2026-07-28 requests carry capabilities in their envelope; 2025-era clients declared them at
   // initialize, which only the server instance remembers.
   const envelope = ctx.mcpReq.envelope as
     | Partial<Record<typeof CLIENT_CAPABILITIES_META_KEY, ClientCapabilities>>
     | undefined;
-  return envelope?.[CLIENT_CAPABILITIES_META_KEY] ?? server.server.getClientCapabilities();
+  return (
+    envelope?.[CLIENT_CAPABILITIES_META_KEY] ??
+    server.server.getClientCapabilities()
+  );
 }
 
 /** The parts of ToolContext fixed when the server is created. */
 type ServerInfo = Pick<ToolContext, "config" | "toolNames">;
 
-function toolContext(server: McpServer, ctx: ServerContext, serverInfo: ServerInfo): ToolContext {
+function toolContext(
+  server: McpServer,
+  ctx: ServerContext,
+  serverInfo: ServerInfo
+): ToolContext {
   const elicitation = clientCapabilities(server, ctx)?.elicitation;
   return {
     ...serverInfo,
@@ -113,7 +143,11 @@ function toolContext(server: McpServer, ctx: ServerContext, serverInfo: ServerIn
   };
 }
 
-function registerTool(server: McpServer, tool: AnyToolDef, serverInfo: ServerInfo): void {
+function registerTool(
+  server: McpServer,
+  tool: AnyToolDef,
+  serverInfo: ServerInfo
+): void {
   const { config } = serverInfo;
   server.registerTool<ToolSchema, ToolSchema>(
     tool.name,
@@ -132,8 +166,8 @@ function registerTool(server: McpServer, tool: AnyToolDef, serverInfo: ServerInf
           return toolErrorResult(
             new MusicToolError(
               "validation_error",
-              "Writes are disabled. Set APPLE_MUSIC_MCP_ENABLE_WRITES=true to enable mutation tools.",
-            ),
+              "Writes are disabled. Set APPLE_MUSIC_MCP_ENABLE_WRITES=true to enable mutation tools."
+            )
           );
         }
 
@@ -141,7 +175,10 @@ function registerTool(server: McpServer, tool: AnyToolDef, serverInfo: ServerInf
         if (tool.writesRequired && config.dryRun) {
           const structuredContent = tool.dryRunResult(input);
           if (!isRecord(structuredContent)) {
-            throw new MusicToolError("script_error", "Tool returned a non-object dry-run result.");
+            throw new MusicToolError(
+              "script_error",
+              "Tool returned a non-object dry-run result."
+            );
           }
           return {
             content: [
@@ -164,7 +201,9 @@ function registerTool(server: McpServer, tool: AnyToolDef, serverInfo: ServerInf
         const context = toolContext(server, ctx, serverInfo);
         const execute = () => tool.handler(input, context);
         const lockCall = tool.writesRequired && tool.lock !== "handler";
-        const result = lockCall ? await withMutationLock(execute) : await execute();
+        const result = lockCall
+          ? await withMutationLock(execute)
+          : await execute();
         if (isInputRequiredResult(result)) {
           log("tool_input_required", {
             tool: tool.name,
@@ -175,7 +214,10 @@ function registerTool(server: McpServer, tool: AnyToolDef, serverInfo: ServerInf
         }
         const structuredContent = result.structuredContent;
         if (!isRecord(structuredContent)) {
-          throw new MusicToolError("script_error", "Tool returned a non-object structured result.");
+          throw new MusicToolError(
+            "script_error",
+            "Tool returned a non-object structured result."
+          );
         }
 
         log("tool_success", {
@@ -185,7 +227,9 @@ function registerTool(server: McpServer, tool: AnyToolDef, serverInfo: ServerInf
         });
 
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+          content: [
+            { type: "text" as const, text: JSON.stringify(structuredContent) },
+          ],
           structuredContent,
         };
       } catch (error) {
@@ -196,6 +240,6 @@ function registerTool(server: McpServer, tool: AnyToolDef, serverInfo: ServerInf
         });
         return toolErrorResult(error);
       }
-    }) as unknown as ToolCallback<ToolSchema>,
+    }) as unknown as ToolCallback<ToolSchema>
   );
 }

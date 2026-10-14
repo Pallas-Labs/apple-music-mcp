@@ -1,10 +1,10 @@
 import * as z from "zod/v4";
-import { persistentIdSchema } from "../config.js";
+
 import { escapeAppleScriptString } from "../applescript/escape.js";
 import { parseAppleScriptJson } from "../applescript/parse.js";
 import { runAppleScript, type ExecFn } from "../applescript/runner.js";
 import { buildScript, buildRawScript } from "../applescript/templates.js";
-import { MusicToolError } from "../types.js";
+import { persistentIdSchema } from "../config.js";
 import {
   ADDITIVE_WRITE_ANNOTATIONS,
   defineTool,
@@ -12,6 +12,7 @@ import {
   READ_ONLY_ANNOTATIONS,
   type ToolSchemaOutput,
 } from "../tool-contracts.js";
+import { MusicToolError } from "../types.js";
 
 const playerStateSchema = z.enum(["playing", "paused", "stopped"]);
 
@@ -21,20 +22,24 @@ const getNowPlayingOutputSchema = z.object({
   artist: z.string().describe("Track artist. Empty when stopped."),
   album: z.string().describe("Track album. Empty when stopped."),
   duration: z.number().describe("Track length in seconds. 0 when stopped."),
-  position: z.number().describe("Playback position in seconds. 0 when stopped."),
+  position: z
+    .number()
+    .describe("Playback position in seconds. 0 when stopped."),
   playerState: playerStateSchema,
 });
 const playbackControlInputSchema = z.object({
   action: z
     .enum(["play", "pause", "next", "previous", "toggle"])
     .describe(
-      "Playback command. next and previous change tracks; toggle switches between play and pause.",
+      "Playback command. next and previous change tracks; toggle switches between play and pause."
     ),
 });
 const playbackControlOutputSchema = z.object({
   success: z.boolean(),
   action: z.string().describe("The action that ran."),
-  playerState: playerStateSchema.describe("Player state shortly after the action ran."),
+  playerState: playerStateSchema.describe(
+    "Player state shortly after the action ran."
+  ),
 });
 
 const repeatModeSchema = z.enum(["off", "one", "all"]);
@@ -44,23 +49,31 @@ const playInputSchema = z
     playlistId: persistentIdSchema
       .optional()
       .describe(
-        "Persistent playlist ID from music.list_playlists or music.create_playlist. Give this or trackId.",
+        "Persistent playlist ID from music.list_playlists or music.create_playlist. Give this or trackId."
       ),
     trackId: persistentIdSchema
       .optional()
       .describe(
-        "Persistent track ID from music.search_library, music.find_tracks, or music.get_playlist_tracks. Give this or playlistId.",
+        "Persistent track ID from music.search_library, music.find_tracks, or music.get_playlist_tracks. Give this or playlistId."
       ),
     shuffle: z
       .boolean()
       .optional()
-      .describe("Turn shuffle on or off before playback starts. Omit to keep the current setting."),
+      .describe(
+        "Turn shuffle on or off before playback starts. Omit to keep the current setting."
+      ),
   })
-  .refine((input) => (input.playlistId === undefined) !== (input.trackId === undefined), {
-    message: "Give exactly one of playlistId or trackId.",
-  });
+  .refine(
+    (input) =>
+      (input.playlistId === undefined) !== (input.trackId === undefined),
+    {
+      message: "Give exactly one of playlistId or trackId.",
+    }
+  );
 const playOutputSchema = z.object({
-  playerState: playerStateSchema.describe("Player state shortly after playback started."),
+  playerState: playerStateSchema.describe(
+    "Player state shortly after playback started."
+  ),
   track: z
     .object({
       id: z.string().describe("Persistent track ID."),
@@ -73,7 +86,13 @@ const playOutputSchema = z.object({
 });
 const setPlayerInputSchema = z
   .object({
-    volume: z.number().int().min(0).max(100).optional().describe("Music's output volume, 0-100."),
+    volume: z
+      .number()
+      .int()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe("Music's output volume, 0-100."),
     shuffle: z.boolean().optional().describe("Turn shuffle on or off."),
     repeat: repeatModeSchema
       .optional()
@@ -83,7 +102,7 @@ const setPlayerInputSchema = z
       .min(0)
       .optional()
       .describe(
-        "Seek to this many seconds into the current track. Fails when the player is stopped.",
+        "Seek to this many seconds into the current track. Fails when the player is stopped."
       ),
   })
   .refine(
@@ -92,13 +111,15 @@ const setPlayerInputSchema = z
       input.shuffle !== undefined ||
       input.repeat !== undefined ||
       input.position !== undefined,
-    { message: "Give at least one of volume, shuffle, repeat, or position." },
+    { message: "Give at least one of volume, shuffle, repeat, or position." }
   );
 const setPlayerOutputSchema = z.object({
   volume: z.number().int().describe("Output volume, 0-100."),
   shuffle: z.boolean().describe("True when shuffle is on."),
   repeat: repeatModeSchema.describe("Repeat mode."),
-  position: z.number().describe("Playback position in seconds. 0 when stopped."),
+  position: z
+    .number()
+    .describe("Playback position in seconds. 0 when stopped."),
   playerState: playerStateSchema,
 });
 
@@ -107,8 +128,12 @@ type PlayResult = ToolSchemaOutput<typeof playOutputSchema>;
 export type PlayerSettings = ToolSchemaOutput<typeof setPlayerInputSchema>;
 type PlayerStatus = ToolSchemaOutput<typeof setPlayerOutputSchema>;
 type NowPlaying = ToolSchemaOutput<typeof getNowPlayingOutputSchema>;
-type PlaybackAction = ToolSchemaOutput<typeof playbackControlInputSchema>["action"];
-type PlaybackControlResult = ToolSchemaOutput<typeof playbackControlOutputSchema>;
+type PlaybackAction = ToolSchemaOutput<
+  typeof playbackControlInputSchema
+>["action"];
+type PlaybackControlResult = ToolSchemaOutput<
+  typeof playbackControlOutputSchema
+>;
 
 export const getNowPlayingTool = defineTool({
   name: "music.get_now_playing",
@@ -133,7 +158,8 @@ export const playbackControlTool = defineTool({
   annotations: ADDITIVE_WRITE_ANNOTATIONS,
   writesRequired: true,
   dryRunResult({ action }) {
-    const playerState: "paused" | "playing" = action === "pause" ? "paused" : "playing";
+    const playerState: "paused" | "playing" =
+      action === "pause" ? "paused" : "playing";
     return {
       success: true,
       action,
@@ -165,7 +191,11 @@ export const playTool = defineTool({
     const result = await playbackOperations.play(target, shuffle);
     return {
       structuredContent: result,
-      logData: { target: target.kind, shuffle, playerState: result.playerState },
+      logData: {
+        target: target.kind,
+        shuffle,
+        playerState: result.playerState,
+      },
     };
   },
 });
@@ -189,7 +219,10 @@ export const setPlayerTool = defineTool({
   },
   async handler(settings) {
     const status = await playbackOperations.setPlayer(settings);
-    return { structuredContent: status, logData: { changed: Object.keys(settings) } };
+    return {
+      structuredContent: status,
+      logData: { changed: Object.keys(settings) },
+    };
   },
 });
 
@@ -230,13 +263,17 @@ function waitForPlayerState(settled: string): string {
             end repeat`;
 }
 
-function buildPlayScript(target: PlayTarget, shuffle: boolean | undefined): string {
+function buildPlayScript(
+  target: PlayTarget,
+  shuffle: boolean | undefined
+): string {
   const safeId = escapeAppleScriptString(target.id);
   const source =
     target.kind === "playlist"
       ? `every playlist whose persistent ID is "${safeId}"`
       : `every track of library playlist 1 whose persistent ID is "${safeId}"`;
-  const shuffleLine = shuffle === undefined ? "" : `set shuffle enabled to ${shuffle}`;
+  const shuffleLine =
+    shuffle === undefined ? "" : `set shuffle enabled to ${shuffle}`;
   return buildScript(`
 try
     tell application id "com.apple.Music"
@@ -263,10 +300,18 @@ end try`);
 
 function buildSetPlayerScript(settings: PlayerSettings): string {
   const writes = [
-    settings.volume === undefined ? "" : `set sound volume to ${settings.volume}`,
-    settings.shuffle === undefined ? "" : `set shuffle enabled to ${settings.shuffle}`,
-    settings.repeat === undefined ? "" : `set song repeat to ${settings.repeat}`,
-    settings.position === undefined ? "" : `set player position to ${settings.position.toFixed(3)}`,
+    settings.volume === undefined
+      ? ""
+      : `set sound volume to ${settings.volume}`,
+    settings.shuffle === undefined
+      ? ""
+      : `set shuffle enabled to ${settings.shuffle}`,
+    settings.repeat === undefined
+      ? ""
+      : `set song repeat to ${settings.repeat}`,
+    settings.position === undefined
+      ? ""
+      : `set player position to ${settings.position.toFixed(3)}`,
   ].filter((line) => line.length > 0);
   // Checked before any write so a rejected seek leaves every setting unchanged.
   const stoppedGuard =
@@ -341,7 +386,10 @@ end replaceText
 `);
 
 /** Each action's AppleScript command and the player-state condition that means it took effect. */
-const PLAYBACK_COMMANDS: Record<PlaybackAction, { command: string; settled: string }> = {
+const PLAYBACK_COMMANDS: Record<
+  PlaybackAction,
+  { command: string; settled: string }
+> = {
   play: { command: "play", settled: 'pState is "playing"' },
   pause: { command: "pause", settled: 'pState is "paused"' },
   next: { command: "next track", settled: 'pState is "playing"' },
@@ -376,40 +424,63 @@ export function createPlaybackOperations(execFn?: ExecFn) {
       return parseAppleScriptJson(
         result.stdout,
         getNowPlayingOutputSchema,
-        "Music returned an invalid now playing payload.",
+        "Music returned an invalid now playing payload."
       );
     },
-    async controlPlayback(action: PlaybackAction): Promise<PlaybackControlResult> {
-      const result = await runAppleScript(buildPlaybackControlScript(action), 15_000, execFn);
+    async controlPlayback(
+      action: PlaybackAction
+    ): Promise<PlaybackControlResult> {
+      const result = await runAppleScript(
+        buildPlaybackControlScript(action),
+        15_000,
+        execFn
+      );
       return parseAppleScriptJson(
         result.stdout,
         playbackControlOutputSchema,
-        "Music returned an invalid playback control payload.",
+        "Music returned an invalid playback control payload."
       );
     },
-    async play(target: PlayTarget, shuffle: boolean | undefined): Promise<PlayResult> {
-      const result = await runAppleScript(buildPlayScript(target, shuffle), 40_000, execFn);
+    async play(
+      target: PlayTarget,
+      shuffle: boolean | undefined
+    ): Promise<PlayResult> {
+      const result = await runAppleScript(
+        buildPlayScript(target, shuffle),
+        40_000,
+        execFn
+      );
       const parsed = parseAppleScriptJson(
         result.stdout,
         playScriptResultSchema,
-        "Music returned an invalid play payload.",
+        "Music returned an invalid play payload."
       );
       if (!parsed.found) {
-        throw new MusicToolError("not_found", `No ${target.kind} has the ID ${target.id}.`);
+        throw new MusicToolError(
+          "not_found",
+          `No ${target.kind} has the ID ${target.id}.`
+        );
       }
-      return { playerState: toPlayerState(parsed.playerState), track: parsed.track };
+      return {
+        playerState: toPlayerState(parsed.playerState),
+        track: parsed.track,
+      };
     },
     async setPlayer(settings: PlayerSettings): Promise<PlayerStatus> {
-      const result = await runAppleScript(buildSetPlayerScript(settings), 20_000, execFn);
+      const result = await runAppleScript(
+        buildSetPlayerScript(settings),
+        20_000,
+        execFn
+      );
       const parsed = parseAppleScriptJson(
         result.stdout,
         setPlayerScriptResultSchema,
-        "Music returned an invalid player settings payload.",
+        "Music returned an invalid player settings payload."
       );
       if (!parsed.ok) {
         throw new MusicToolError(
           "validation_error",
-          "The player is stopped, so there is no track to seek in. Start playback first.",
+          "The player is stopped, so there is no track to seek in. Start playback first."
         );
       }
       return {

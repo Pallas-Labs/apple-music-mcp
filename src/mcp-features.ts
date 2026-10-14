@@ -1,5 +1,6 @@
 import type { CacheHint, McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
+
 import { getNowPlaying } from "./tools/playback.js";
 
 // The catalogue is fixed for the process lifetime: env flags are read once at startup.
@@ -8,7 +9,10 @@ export const STATIC_CATALOGUE_CACHE_HINT = Object.freeze({
   cacheScope: "private",
 } satisfies CacheHint);
 
-const LIVE_CACHE_HINT = Object.freeze({ ttlMs: 0, cacheScope: "private" } satisfies CacheHint);
+const LIVE_CACHE_HINT = Object.freeze({
+  ttlMs: 0,
+  cacheScope: "private",
+} satisfies CacheHint);
 
 const SERVER_GUIDE = `# Apple Music MCP guide
 
@@ -30,13 +34,16 @@ export function registerResources(server: McpServer): void {
     "music://guide",
     {
       title: "Apple Music MCP guide",
-      description: "Safe usage, identifiers, and write controls for this server.",
+      description:
+        "Safe usage, identifiers, and write controls for this server.",
       mimeType: "text/markdown",
       cacheHint: STATIC_CATALOGUE_CACHE_HINT,
     },
     async (uri) => ({
-      contents: [{ uri: uri.href, mimeType: "text/markdown", text: SERVER_GUIDE }],
-    }),
+      contents: [
+        { uri: uri.href, mimeType: "text/markdown", text: SERVER_GUIDE },
+      ],
+    })
   );
 
   server.registerResource(
@@ -56,7 +63,7 @@ export function registerResources(server: McpServer): void {
           text: JSON.stringify(await getNowPlaying()),
         },
       ],
-    }),
+    })
   );
 }
 
@@ -65,10 +72,20 @@ export function registerPrompts(server: McpServer): void {
     "curate-playlist",
     {
       title: "Curate a playlist",
-      description: "Plan and create a bounded playlist from the local Apple Music library.",
+      description:
+        "Plan and create a bounded playlist from the local Apple Music library.",
       argsSchema: z.object({
-        theme: z.string().trim().min(1).describe("Mood, genre, artist, era, or other theme."),
-        name: z.string().trim().min(1).optional().describe("Optional playlist name."),
+        theme: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Mood, genre, artist, era, or other theme."),
+        name: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe("Optional playlist name."),
       }),
     },
     ({ theme, name }) => ({
@@ -79,7 +96,9 @@ export function registerPrompts(server: McpServer): void {
             type: "text" as const,
             text: [
               `Curate an Apple Music playlist around: ${theme}.`,
-              name ? `Use the playlist name: ${name}.` : "Choose a concise playlist name.",
+              name
+                ? `Use the playlist name: ${name}.`
+                : "Choose a concise playlist name.",
               "Call music.health first, then use music.find_tracks with explicit bounded criteria.",
               "Show the proposed tracks before creating anything unless I already approved creation.",
               "Use music.create_playlist_from_criteria only after approval and report partial failures.",
@@ -87,14 +106,15 @@ export function registerPrompts(server: McpServer): void {
           },
         },
       ],
-    }),
+    })
   );
 
   server.registerPrompt(
     "library-overview",
     {
       title: "Summarize my library",
-      description: "Inspect playlists, folders, and playback without changing Apple Music.",
+      description:
+        "Inspect playlists, folders, and playback without changing Apple Music.",
     },
     () => ({
       messages: [
@@ -106,6 +126,6 @@ export function registerPrompts(server: McpServer): void {
           },
         },
       ],
-    }),
+    })
   );
 }

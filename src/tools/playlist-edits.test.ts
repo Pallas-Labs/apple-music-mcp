@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+
 import { MusicToolError } from "../types.js";
 import { createPlaylistEditOperations } from "./playlist-edits.js";
 
@@ -9,7 +10,12 @@ type Info = {
   folderId?: string;
 };
 
-function playlistPayload({ kind, applied, name = "Road Trip", folderId = "" }: Info): string {
+function playlistPayload({
+  kind,
+  applied,
+  name = "Road Trip",
+  folderId = "",
+}: Info): string {
   return JSON.stringify({
     found: true,
     id: "ABCDEF1234567890",
@@ -40,7 +46,11 @@ async function errorOf(promise: Promise<unknown>): Promise<MusicToolError> {
 describe("createPlaylistEditOperations.describe", () => {
   test("reports any kind of playlist, including ones that refuse edits", async () => {
     const { operations } = recordingRunner(
-      playlistPayload({ kind: "folder", applied: false, folderId: "AAAA1111BBBB2222" }),
+      playlistPayload({
+        kind: "folder",
+        applied: false,
+        folderId: "AAAA1111BBBB2222",
+      })
     );
     expect(await operations.describe("ABCDEF1234567890")).toEqual({
       id: "ABCDEF1234567890",
@@ -57,17 +67,23 @@ describe("createPlaylistEditOperations.describe", () => {
 describe("createPlaylistEditOperations.delete", () => {
   test("deletes a user playlist and returns what it deleted", async () => {
     const { scripts, operations } = recordingRunner(
-      playlistPayload({ kind: "user", applied: true }),
+      playlistPayload({ kind: "user", applied: true })
     );
     const info = await operations.delete("ABCDEF1234567890");
-    expect(info).toMatchObject({ id: "ABCDEF1234567890", name: "Road Trip", trackCount: 12 });
+    expect(info).toMatchObject({
+      id: "ABCDEF1234567890",
+      name: "Road Trip",
+      trackCount: 12,
+    });
     // The kind check runs inside the delete script, so a stale describe cannot delete a folder.
     expect(scripts[0]).toContain('if {"user"} contains pKind then');
   });
 
   test("refuses folders, subscriptions, and built-in playlists", async () => {
     for (const kind of ["folder", "subscription", "system"] as const) {
-      const { operations } = recordingRunner(playlistPayload({ kind, applied: false }));
+      const { operations } = recordingRunner(
+        playlistPayload({ kind, applied: false })
+      );
       const error = await errorOf(operations.delete("ABCDEF1234567890"));
       expect(error.code).toBe("validation_error");
       expect(error.message).toStartWith('"Road Trip" is a');
@@ -75,7 +91,9 @@ describe("createPlaylistEditOperations.delete", () => {
   });
 
   test("reports script_error when Music did not apply the delete", async () => {
-    const { operations } = recordingRunner(playlistPayload({ kind: "user", applied: false }));
+    const { operations } = recordingRunner(
+      playlistPayload({ kind: "user", applied: false })
+    );
     const error = await errorOf(operations.delete("ABCDEF1234567890"));
     expect(error.code).toBe("script_error");
     expect(error.message).toBe('Music did not delete "Road Trip".');
@@ -85,7 +103,7 @@ describe("createPlaylistEditOperations.delete", () => {
 describe("createPlaylistEditOperations.rename", () => {
   test("escapes the new name and returns the renamed playlist", async () => {
     const { scripts, operations } = recordingRunner(
-      playlistPayload({ kind: "user", applied: true, name: 'Say "hi"\nnow' }),
+      playlistPayload({ kind: "user", applied: true, name: 'Say "hi"\nnow' })
     );
     const info = await operations.rename("ABCDEF1234567890", 'Say "hi"\nnow');
     expect(info.name).toBe('Say "hi"\nnow');
@@ -94,7 +112,7 @@ describe("createPlaylistEditOperations.rename", () => {
 
   test("renames folders as well as user playlists", async () => {
     const { operations } = recordingRunner(
-      playlistPayload({ kind: "folder", applied: true, name: "New" }),
+      playlistPayload({ kind: "folder", applied: true, name: "New" })
     );
     expect(await operations.rename("ABCDEF1234567890", "New")).toMatchObject({
       kind: "folder",
@@ -104,7 +122,9 @@ describe("createPlaylistEditOperations.rename", () => {
 
   test("refuses built-in and subscription playlists with validation_error", async () => {
     for (const kind of ["system", "subscription"] as const) {
-      const { operations } = recordingRunner(playlistPayload({ kind, applied: false }));
+      const { operations } = recordingRunner(
+        playlistPayload({ kind, applied: false })
+      );
       const error = await errorOf(operations.rename("ABCDEF1234567890", "New"));
       expect(error.code).toBe("validation_error");
       expect(error.message).toStartWith('"Road Trip" ');

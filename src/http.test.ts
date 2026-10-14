@@ -1,5 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+
+import {
+  Client,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+
 import { serveHttp } from "./http.js";
 
 const port = 40_000 + Math.floor(Math.random() * 20_000);
@@ -24,7 +29,7 @@ describe("HTTP transport", () => {
     test(`lists tools with ${mode} protocol negotiation`, async () => {
       const client = new Client(
         { name: "http-test", version: "1.0.0" },
-        { versionNegotiation: { mode } },
+        { versionNegotiation: { mode } }
       );
       await client.connect(new StreamableHTTPClientTransport(url));
       try {
